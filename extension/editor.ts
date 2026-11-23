@@ -22,9 +22,10 @@ export function promptBorder(p: Palette, width: number, color: string, hidden: n
 	return p.fg(color, `${"─".repeat(left)}${label}${"─".repeat(right)}`);
 }
 
-/** `pbn`: the gutter of the first line. */
-export function promptPointer(p: Palette, shell: boolean): string {
-	return shell ? p.fg("bashBorder", `!${NBSP}`) : p.dim(`${POINTER}${NBSP}`);
+/** `pbn` / `A`: the gutter of the first line, faint only while a turn runs (`dimColor: isLoading`). */
+export function promptPointer(p: Palette, shell: boolean, busy = false): string {
+	const text = shell ? p.fg("bashBorder", `!${NBSP}`) : `${POINTER}${NBSP}`;
+	return busy ? p.dim(text) : text;
 }
 
 /** The placeholder line: the cursor on the first letter, the rest faint. */
@@ -58,6 +59,8 @@ export interface PromptOptions {
 	enabled: () => boolean;
 	/** The `Try "…"` text to show while the input is empty, or undefined. */
 	placeholder: () => string | undefined;
+	/** A turn is running. */
+	busy?: () => boolean;
 }
 
 /** Wraps an editor instance in Claude Code's prompt box. */
@@ -84,7 +87,7 @@ export function decorateEditor<T extends object>(editor: T, options: PromptOptio
 		const out = [promptBorder(p, width, color, above, "↑")];
 		const placeholder = text.length === 0 ? options.placeholder() : undefined;
 		content.forEach((line, i) => {
-			const gutter = i === 0 && above === 0 ? promptPointer(p, shell) : " ".repeat(GUTTER);
+			const gutter = i === 0 && above === 0 ? promptPointer(p, shell, options.busy?.() ?? false) : " ".repeat(GUTTER);
 			const body = placeholder !== undefined && i === 0 ? placeholderLine(p, placeholder, width - GUTTER, target.focused !== false) : line;
 			out.push(gutter + body);
 		});

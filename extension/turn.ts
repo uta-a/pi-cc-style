@@ -4,7 +4,7 @@
  */
 import { clampLines, formatDuration, TEARDROP, turnVerb } from "./format.ts";
 import type { Palette } from "./palette.ts";
-import { MODE_INFO, modePill, type PermissionMode } from "./permissions.ts";
+import { MODE_INFO, type PermissionMode } from "./permissions.ts";
 
 export const TURN_ENTRY = "cc-style-turn";
 
@@ -48,15 +48,17 @@ export function renderTurnSummary(p: Palette, data: TurnEntryData, now = Date.no
 }
 
 /**
- * The row under the prompt (`jRe`): the mode pill when the mode is not manual, then a faint
- * italic hint — "esc to interrupt" while working, "shift+tab to cycle" next to a pill — or
- * "? for shortcuts" when there is nothing else.
+ * The row under the prompt (`ylt` with `yD`): the mode in its colour as `⏵⏵ accept edits on`
+ * followed by a faint `(shift+tab to cycle)`, then "esc to interrupt" while working; with the
+ * manual mode and nothing running, "? for shortcuts". Items are joined by a faint " · ".
  */
 export function renderPromptFooter(p: Palette, mode: PermissionMode, busy: boolean, width = Infinity): string {
 	const items: string[] = [];
-	if (mode !== "default") items.push(modePill(p, mode));
-	if (busy) items.push(p.style("esc to interrupt", { dim: true, italic: true }));
-	else if (mode !== "default") items.push(p.style("shift+tab to cycle", { dim: true, italic: true }));
+	if (mode !== "default") {
+		const info = MODE_INFO[mode];
+		items.push(`${p.fg(info.color, `${info.symbol} ${info.indicator} on`)}${p.dim(" (shift+tab to cycle)")}`);
+	}
+	if (busy) items.push(p.dim("esc to interrupt"));
 	if (items.length === 0) items.push(p.dim("? for shortcuts"));
 	const line = `  ${items.join(p.dim(" · "))}`;
 	return Number.isFinite(width) ? clampLines([line], width)[0]! : line;

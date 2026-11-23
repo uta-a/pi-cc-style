@@ -291,6 +291,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 					palette,
 					enabled: () => getSettings().prompt,
 					placeholder: () => (hasUserMessage ? undefined : placeholder),
+					busy: () => turnStartedAt !== undefined,
 				});
 			});
 		}

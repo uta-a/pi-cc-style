@@ -32,7 +32,7 @@
 | 動詞 | `b`（185語）、`jy`（8語）、`Wy`、`fse` | 一覧とハッシュによる選び方 | `extension/format.ts` |
 | ターン終了 | `iM` `lM` `VMn` | `✻ <Verb> for <time>`、完了したターンだけ | `extension/turn.ts` |
 | 入力欄 | `jpt` `pbn` `zwa` | 上下だけの round 罫線、`❯`+NBSP、`Try "…"` | `extension/editor.ts` |
-| 入力欄の下 | `jRe` `eH` `dK` `Dr` | モード名（小文字、bypass は error）、`esc to interrupt`、`shift+tab to cycle` | `extension/turn.ts`（`renderPromptFooter`） |
+| 入力欄の下 | `ylt` `yD` `Uut` `YC` `Dr`（全画面版は `jRe` `eH`） | inline 版: `⏵⏵ accept edits on` をモードの色、dim の ` (shift+tab to cycle)`、`esc to interrupt`、`? for shortcuts` | `extension/turn.ts`（`renderPromptFooter`） |
 | 権限モード | `Dr` `Tr` | manual / accept edits / plan / bypass permissions | `extension/permissions.ts` |
 | 確認ダイアログ | `tl` `Ate` `ct` `n8n` `$t` `hp` `r8i` | タイトル、`Do you want to proceed?`、3択の文言、拒否時の文面 | `extension/permissions.ts` |
 | compaction | `s7n` ほか | `⏺ Compact summary (ctrl+o to expand)` | `extension/messages.ts` |

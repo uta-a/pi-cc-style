@@ -47,8 +47,8 @@ pi の見た目と UI の挙動を Claude Code 2.1.330 に合わせる pi 拡張
 | スピナー | `· ✢ ✳ ✶ ✻ ✽` を2秒周期で往復、動詞185語から1つ、3文字のきらめき、10秒無応答で error 色へ、thinking が長いと warning 色へ。括弧内は経過時間・`↓ N tokens`・thinking の状態（`still thinking`、`thought for Ns` など）を幅に収まる分だけ |
 | ターン終了 | `✻ Cooked for 1m 5s`（動詞8語からメッセージごとに決まる） |
 | 中断・エラー | `  ⎿  Interrupted · What should Claude do instead?`、API エラーは warning 色の `⏺` 行 |
-| 入力欄 | 上下だけの罫線（`promptBorder`、`!` で始まると `bashBorder`）、`❯` の前置き、セッションが空のあいだの `Try "…"` |
-| 入力欄の下 | `? for shortcuts` / `esc to interrupt`、権限モードと `shift+tab to cycle` |
+| 入力欄 | 上下だけの罫線（`promptBorder`、`!` で始まると `bashBorder`）、`❯` の前置き（作業中だけ薄く）、セッションが空のあいだの `Try "…"` |
+| 入力欄の下 | `? for shortcuts` / `esc to interrupt`、権限モードは `⏵⏵ accept edits on (shift+tab to cycle)` のようにモードの色で |
 | `!` コマンド | `! cmd` の帯と、`⎿` の下に3行までの出力 |
 | compaction | `⏺ Compact summary (ctrl+o to expand)`、展開で要約 |
 | 権限モード | shift+tab で manual → accept edits → plan → bypass permissions を切り替え。bash / edit / write の前に Claude Code の確認ダイアログを出す |

@@ -345,7 +345,9 @@ test("turn summary and prompt footer", () => {
 	assert.equal(formatDoneTime(at, at + 2 * 86_400_000, "en-US"), "Mon 3:04 PM");
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "default", false)), "  ? for shortcuts");
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "default", true)), "  esc to interrupt");
-	assert.equal(stripTerminalSequences(renderPromptFooter(p, "acceptEdits", false)), "  accept edits · shift+tab to cycle");
+	assert.equal(stripTerminalSequences(renderPromptFooter(p, "acceptEdits", false)), "  ⏵⏵ accept edits on (shift+tab to cycle)");
+	assert.equal(stripTerminalSequences(renderPromptFooter(p, "plan", true)), "  ⏸ plan mode on (shift+tab to cycle) · esc to interrupt");
+	assert.equal(stripTerminalSequences(renderPromptFooter(p, "bypassPermissions", false, 36)).length, 36);
 });
 
 test("! commands and compaction", () => {
