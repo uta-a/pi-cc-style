@@ -264,6 +264,12 @@ test("permission modes and prompt", () => {
 	assert.equal(lines[2], " Bash command");
 	assert.ok(lines.includes(" Do you want to proceed?"));
 	assert.ok(lines.some((l) => l.startsWith(" ❯ 1. Yes")));
+	assert.ok(lines.includes("   3. No"));
+	assert.ok(lines.includes(" Esc to cancel · Tab to amend"));
+	const amending = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "npm test" }, cwd: "/w" }, 2, 60, { active: true, text: "" }));
+	assert.ok(amending.includes(" ❯ 3. No and tell Claude what to do differently"));
+	const edit = plain(renderPermissionPrompt(p, { toolName: "write", input: { path: "/w/src/a.ts", content: "x" }, cwd: "/w" }, 0, 60, undefined));
+	assert.ok(edit.includes("   src/a.ts"));
 });
 
 test("allowed prefixes cover one program or subcommand in one directory", () => {

@@ -19,6 +19,7 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { parseDiff, renderDiffRows } from "./diff.ts";
+import { displayPath } from "./tools.ts";
 import { FAST_FORWARD, moreLines, PAUSE, POINTER, sanitize } from "./format.ts";
 import type { Palette } from "./palette.ts";
 
@@ -190,7 +191,8 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 	const rawPath = typeof req.input.path === "string" ? req.input.path : typeof req.input.file_path === "string" ? req.input.file_path : "";
 	const path = sanitize(rawPath).replace(/\n/g, " ");
 	const abs = rawPath ? resolveToolPath(rawPath, req.cwd) : "";
-	const shortPath = path;
+	// `Xo`: the path relative to the working directory, or with ~.
+	const shortPath = abs ? displayPath(abs, req.cwd) : path;
 	if (SHELL_TOOLS.has(req.toolName)) {
 		const command = sanitize(typeof req.input.command === "string" ? req.input.command : "");
 		const prefix = req.toolName === "bash" ? commandPrefix(command) : undefined;
@@ -205,7 +207,7 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 							label: `Yes, and don't ask again for ${p.bold(prefix)} commands in ${p.bold(req.cwd.replace(process.env.HOME ?? "\0", "~"))}`,
 						},
 					]),
-			{ value: "no", label: `No, and tell Claude what to do differently ${p.bold("(esc)")}` },
+			{ value: "no", label: "No" },
 		];
 		const body = limitRows(p, command.split("\n").flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width - 4)).map((l) => `  ${l}`)));
 		const description = typeof req.input.description === "string" ? [`  ${p.dim(sanitize(req.input.description).replace(/\n/g, " "))}`] : [];
@@ -219,7 +221,7 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 			value: "yes-session",
 			label: `Yes, and switch to ${p.bold("accept edits (auto-approve file edits and common file commands)")} for this session ${p.bold("(shift+tab)")}`,
 		},
-		{ value: "no", label: `No, and tell Claude what to do differently ${p.bold("(esc)")}` },
+		{ value: "no", label: "No" },
 	];
 	if (req.toolName === "write") {
 		const exists = abs ? existsSync(abs) : false;
@@ -277,13 +279,14 @@ export function renderPermissionPrompt(
 		const pointer = focused ? p.fg("suggestion", POINTER) : " ";
 		const number = p.dim(`${i + 1}.`.padEnd(numberWidth));
 		let label = focused ? p.fg("suggestion", option.label) : option.label;
+		// The `No` option is an input (`type: "input"`) once amending; its placeholder is faint.
 		if (option.value === "no" && feedback?.active) {
-			label = `${p.fg("suggestion", "No")}, ${feedback.text ? feedback.text : p.dim("tell Claude what to do differently")}`;
+			label = `${p.fg("suggestion", "No")} ${feedback.text ? feedback.text : p.dim("and tell Claude what to do differently")}`;
 		}
 		out.push(truncateToWidth(` ${pointer} ${number} ${label}`, width, "…"));
 	});
 	out.push("");
-	const hints = feedback?.active ? "enter to submit · esc to cancel" : "esc to cancel · tab to amend";
+	const hints = feedback?.active ? "Enter to submit · Esc to cancel" : "Esc to cancel · Tab to amend";
 	out.push(` ${p.dim(hints)}`);
 	return out.map((line) => (visibleWidth(line) > width ? truncateToWidth(line, width, "") : line));
 }

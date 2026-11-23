@@ -437,7 +437,10 @@ export default function piCcStyle(pi: ExtensionAPI) {
 							}
 							if (matchesKey(data, Key.up)) selected = (selected + values.length - 1) % values.length;
 							else if (matchesKey(data, Key.down)) selected = (selected + 1) % values.length;
-							else if (matchesKey(data, Key.tab)) feedback = { active: true, text: "" };
+							else if (matchesKey(data, Key.tab)) {
+								feedback = { active: true, text: "" };
+								selected = values.indexOf("no");
+							}
 							else if (matchesKey(data, Key.shift("tab")) && values.includes("yes-session") && event.toolName !== "bash") return done({ value: "yes-session" });
 							else if (matchesKey(data, Key.escape)) return done({ value: "no" });
 							else if (/^[1-9]$/.test(data) && Number(data) <= values.length) return done({ value: values[Number(data) - 1]! });
