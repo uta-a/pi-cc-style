@@ -19,6 +19,8 @@ export interface StyleSettings {
 	tools: boolean;
 	/** Claude Code's message rendering (⏺, ❯, ∴, interrupts). */
 	messages: boolean;
+	/** shift+tab cycles the permission mode (it then no longer cycles pi's thinking level). */
+	modeCycle: boolean;
 	/** Initial permission mode. pi itself asks for nothing, which is bypassPermissions. */
 	permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions";
 }
@@ -31,6 +33,7 @@ export const DEFAULT_SETTINGS: StyleSettings = {
 	prompt: true,
 	tools: true,
 	messages: true,
+	modeCycle: true,
 	permissionMode: "bypassPermissions",
 };
 
@@ -41,7 +44,7 @@ export function readSettings(raw: unknown): StyleSettings {
 	const out = { ...DEFAULT_SETTINGS };
 	if (!raw || typeof raw !== "object") return out;
 	const source = raw as Record<string, unknown>;
-	for (const key of ["header", "spinner", "turnDuration", "prompt", "tools", "messages"] as const) {
+	for (const key of ["header", "spinner", "turnDuration", "prompt", "tools", "messages", "modeCycle"] as const) {
 		if (typeof source[key] === "boolean") out[key] = source[key];
 	}
 	if (typeof source.headerTitle === "string" && source.headerTitle.trim()) out.headerTitle = source.headerTitle;

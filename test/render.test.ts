@@ -259,7 +259,7 @@ test("permission modes and prompt", () => {
 	assert.equal(needsPrompt({ ...state, allowedCommands: new Set(["ls"]) }, "bash", { command: "ls x" }), false);
 	assert.equal(needsPrompt({ ...state, mode: "bypassPermissions" }, "bash", { command: "rm" }), false);
 	assert.equal(commandPrefix("  git status"), "git");
-	assert.ok(rejectReason("use pnpm").endsWith("the user said:\nuse pnpm"));
+	assert.ok(rejectReason("use pnpm").endsWith("To tell you how to proceed, the user said: use pnpm"));
 	assert.equal(stripTerminalSequences(modePill(p, "acceptEdits")), "accept edits");
 	const lines = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "npm test" }, cwd: "/w" }, 0, 60, undefined));
 	assert.equal(lines[2], " Bash command");

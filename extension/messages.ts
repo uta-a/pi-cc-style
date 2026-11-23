@@ -50,6 +50,27 @@ export class Lines implements Component {
 	invalidate() {}
 }
 
+/** Lines that depend only on the width and the palette, computed once per width. */
+export class CachedLines implements Component {
+	private readonly draw: (width: number) => string[];
+	private readonly palette: () => Palette;
+	private cache: { width: number; palette: Palette; lines: string[] } | undefined;
+	constructor(draw: (width: number) => string[], palette: () => Palette) {
+		this.draw = draw;
+		this.palette = palette;
+	}
+	render(width: number): string[] {
+		const p = this.palette();
+		if (this.cache && this.cache.width === width && this.cache.palette === p) return this.cache.lines;
+		const lines = this.draw(width);
+		this.cache = { width, palette: p, lines };
+		return lines;
+	}
+	invalidate() {
+		this.cache = undefined;
+	}
+}
+
 export class Blank implements Component {
 	render(): string[] {
 		return [""];
@@ -208,26 +229,26 @@ export function updateAssistantContent(
 			const label = (this.hiddenThinkingLabel ?? "").trim();
 			if (hidden && !label) continue;
 			const text = hidden ? label.replace(/\.\.\.$/, ELLIPSIS) : parts.join("\n\n");
-			add(new Lines((width) => renderThinking(getPalette(), text, width)));
+			add(new CachedLines((width) => renderThinking(getPalette(), text, width), getPalette));
 			needsSpacer = true;
 		}
 	}
 	const hasToolCalls = content.some((c) => c.type === "toolCall");
 	this.hasToolCalls = hasToolCalls;
 	if (message.stopReason === "length") {
-		add(new Lines((width) => renderApiError(getPalette(), "Response was truncated before completion.", width)));
+		add(new CachedLines((width) => renderApiError(getPalette(), "Response was truncated before completion.", width), getPalette));
 	} else if (!hasToolCalls) {
 		if (message.stopReason === "aborted") {
 			const custom = message.errorMessage && message.errorMessage !== "Request was aborted" ? message.errorMessage : undefined;
 			if (custom) {
-				add(new Lines((width) => renderApiError(getPalette(), custom, width)));
+				add(new CachedLines((width) => renderApiError(getPalette(), custom, width), getPalette));
 			} else {
 				// The elbow hangs under the row above it, so no blank line in between.
-				this.contentContainer.addChild(new Lines((width) => renderInterrupted(getPalette(), width)));
+				this.contentContainer.addChild(new CachedLines((width) => renderInterrupted(getPalette(), width), getPalette));
 			}
 		} else if (message.stopReason === "error") {
 			const text = message.errorMessage || "Unknown error";
-			add(new Lines((width) => renderApiError(getPalette(), text, width)));
+			add(new CachedLines((width) => renderApiError(getPalette(), text, width), getPalette));
 		}
 	}
 }

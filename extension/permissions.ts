@@ -46,12 +46,13 @@ export function modePill(p: Palette, mode: PermissionMode): string {
 /** `hp` / `r8i`: what the model is told when the user declines. */
 export const REJECT_MESSAGE =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
+/** `O6`: the same refusal followed by what the user typed. */
 export const REJECT_WITH_FEEDBACK =
-	"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file).";
+	"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said: ";
 
 export function rejectReason(feedback?: string): string {
 	if (!feedback?.trim()) return REJECT_MESSAGE;
-	return `${REJECT_WITH_FEEDBACK} To tell you how to proceed, the user said:\n${feedback.trim()}`;
+	return `${REJECT_WITH_FEEDBACK}${feedback.trim()}`;
 }
 
 /** The first word of a command, which "don't ask again" allows for the session. */
@@ -109,7 +110,11 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 	}
 	const editOptions = (): PermissionOption[] => [
 		{ value: "yes", label: "Yes" },
-		{ value: "yes-session", label: `Yes, allow all edits during this session ${p.bold("(shift+tab)")}` },
+		// `sZe` + `Vs.acceptEdits`, then the cycle key in bold.
+		{
+			value: "yes-session",
+			label: `Yes, and switch to ${p.bold("accept edits (auto-approve file edits and common file commands)")} for this session ${p.bold("(shift+tab)")}`,
+		},
 		{ value: "no", label: `No, and tell Claude what to do differently ${p.bold("(esc)")}` },
 	];
 	if (req.toolName === "write") {

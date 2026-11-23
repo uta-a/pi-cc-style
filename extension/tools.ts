@@ -349,10 +349,17 @@ export class ResultRows implements Component {
 	constructor(palette: () => Palette) {
 		this.palette = palette;
 	}
+	private cache: { width: number; draw: (width: number) => string[]; palette: Palette; lines: string[] } | undefined;
 	render(width: number): string[] {
 		if (this.collapsed()) return [];
-		const lines = fit(this.draw(width), width);
-		return lines.length > 0 ? resultRows(lines, this.palette()) : [];
+		// The result only changes when pi calls renderResult again (a new draw) or the width changes.
+		const p = this.palette();
+		const c = this.cache;
+		if (c && c.width === width && c.draw === this.draw && c.palette === p) return c.lines;
+		const fitted = fit(this.draw(width), width);
+		const lines = fitted.length > 0 ? resultRows(fitted, p) : [];
+		this.cache = { width, draw: this.draw, palette: p, lines };
+		return lines;
 	}
 	invalidate() {}
 }

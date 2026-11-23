@@ -33,7 +33,7 @@ import { decorateEditor } from "./editor.ts";
 import { COLLAPSIBLE, ToolGroups } from "./grouping.ts";
 import { PROMPT_EXAMPLES, tildify } from "./format.ts";
 import { renderHeader } from "./header.ts";
-import { Lines, patchExtras, patchMessages } from "./messages.ts";
+import { CachedLines, Lines, patchExtras, patchMessages } from "./messages.ts";
 import {
 	needsPrompt,
 	nextMode,
@@ -136,6 +136,8 @@ export default function piCcStyle(pi: ExtensionAPI) {
 	let currentCtx: ExtensionContext | undefined;
 	/** A permission prompt is open; the hint row under the prompt hides meanwhile. */
 	let prompting = 0;
+	/** The prompt editor, to know whether it has the focus. */
+	let promptEditor: { focused?: boolean } | undefined;
 
 	const requestRender = () => tui?.requestRender();
 	const startTicker = () => {
@@ -213,7 +215,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 	pi.registerEntryRenderer<TurnEntryData>(TURN_ENTRY, (entry) => {
 		const data = entry.data;
 		if (!data || !getSettings().turnDuration) return undefined;
-		return new Lines(() => renderTurnSummary(palette(), data));
+		return new CachedLines(() => renderTurnSummary(palette(), data), palette);
 	});
 
 	const installUi = (ctx: ExtensionContext) => {
@@ -264,7 +266,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 				"cc-style-hints",
 				(widgetTui) => {
 					tui = widgetTui;
-					return new Lines(() => (prompting > 0 ? [] : [renderPromptFooter(palette(), permissions.mode, spinner.active)]));
+					return new Lines(() => (prompting > 0 ? [] : [renderPromptFooter(palette(), permissions.mode, turnStartedAt !== undefined)]));
 				},
 				{ placement: "belowEditor" },
 			);
@@ -272,6 +274,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 			ctx.ui.setEditorComponent((editorTui, theme, keybindings) => {
 				tui = editorTui;
 				const editor = previous ? previous(editorTui, theme, keybindings) : new CustomEditor(editorTui, theme, keybindings);
+				promptEditor = editor as { focused?: boolean };
 				return decorateEditor(editor, {
 					palette,
 					enabled: () => getSettings().prompt,
@@ -280,14 +283,19 @@ export default function piCcStyle(pi: ExtensionAPI) {
 			});
 		}
 
-		// shift+tab cycles the permission mode, as in Claude Code.
+		// shift+tab cycles the permission mode, as in Claude Code: only while the prompt has the focus,
+		// so dialogs and pi's selectors keep the key.
 		unsubscribeInput?.();
-		unsubscribeInput = ctx.ui.onTerminalInput((data) => {
-			if (!matchesKey(data, Key.shift("tab"))) return undefined;
-			permissions.mode = nextMode(permissions.mode);
-			requestRender();
-			return { consume: true };
-		});
+		unsubscribeInput = undefined;
+		if (getSettings().modeCycle) {
+			unsubscribeInput = ctx.ui.onTerminalInput((data) => {
+				if (!matchesKey(data, Key.shift("tab"))) return undefined;
+				if (prompting > 0 || !promptEditor?.focused) return undefined;
+				permissions.mode = nextMode(permissions.mode);
+				requestRender();
+				return { consume: true };
+			});
+		}
 	};
 
 	pi.on("session_start", (_event, ctx) => {
@@ -318,11 +326,15 @@ export default function piCcStyle(pi: ExtensionAPI) {
 		setUi(undefined);
 	});
 
-	// Spinner state.
+	// Turn and spinner state. The turn is tracked even with the spinner off, for the summary and hints.
+	let turnStartedAt: number | undefined;
 	pi.on("agent_start", () => {
-		if (!getSettings().spinner) return;
-		spinner.start(Date.now());
-		startTicker();
+		turnStartedAt = Date.now();
+		if (getSettings().spinner) {
+			spinner.start(turnStartedAt);
+			startTicker();
+		}
+		requestRender();
 	});
 	pi.on("message_start", (event) => {
 		groups.start(event.message as never);
@@ -342,12 +354,12 @@ export default function piCcStyle(pi: ExtensionAPI) {
 	pi.on("tool_execution_start", () => spinner.toolStart(Date.now()));
 	pi.on("tool_execution_end", () => spinner.toolEnd(Date.now()));
 	pi.on("agent_end", (event) => {
-		const startedAt = spinner.startedAt;
-		const wasActive = spinner.active;
+		const startedAt = turnStartedAt;
+		turnStartedAt = undefined;
 		spinner.stop();
 		stopTicker();
 		requestRender();
-		if (!wasActive || !getSettings().turnDuration) return;
+		if (startedAt === undefined || !getSettings().turnDuration) return;
 		const last = [...event.messages].reverse().find((m) => (m as { role?: string }).role === "assistant") as
 			| { stopReason?: string }
 			| undefined;

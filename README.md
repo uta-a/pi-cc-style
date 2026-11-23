@@ -88,8 +88,8 @@ pi は何も確認せずにツールを実行します。これは Claude Code �
 | plan | bash、edit、write |
 | bypass permissions | なし |
 
-- shift+tab で順に切り替えます。`/cc-mode <mode>` でも指定できます。pi の shift+tab（thinking レベルの切り替え）はこの拡張が受け取るため、thinking レベルは `/model` などで変更してください
-- 確認ダイアログ: `1` / `2` / `3` か ↑↓ と Enter。`2` は bash ならそのコマンドの先頭の語をセッション中は許可、edit / write なら accept edits に切り替えます。`3` か Esc で拒否すると、Claude Code と同じ文面（止まってユーザーの指示を待つよう求めるもの）をツールの結果としてモデルに返し、ターンの終了を要求します。同時に実行された他のツールが成功した場合、pi はターンを続けます。Tab で理由を書き添えられます
+- 入力欄にフォーカスがあるとき、shift+tab で順に切り替えます。`/cc-mode <mode>` でも指定できます。pi の shift+tab（thinking レベルの切り替え）はこの拡張が受け取ります。thinking レベルを shift+tab で変えたい場合は `"modeCycle": false` にしてください
+- 確認ダイアログ: `1` / `2` / `3` か ↑↓ と Enter。`2` は bash ならそのコマンドの先頭の語をセッション中は許可、edit / write なら accept edits に切り替えます（ダイアログ内の shift+tab も同じ）。`3` か Esc で拒否すると、Claude Code と同じ文面（止まってユーザーの指示を待つよう求めるもの）をツールの結果としてモデルに返し、ターンの終了を要求します。同時に実行された他のツールが成功した場合、pi はターンを続けます。Tab で理由を書き添えられます
 - plan モードは確認の対象だけを切り替えます。Claude Code の plan モードが持つ「計画だけを立てる」指示はシステムプロンプトの機能なので含めていません
 - read / grep / find / ls と、他の拡張のツールは確認しません
 
@@ -107,6 +107,7 @@ pi は何も確認せずにツールを実行します。これは Claude Code �
     "prompt": true,
     "tools": true,
     "messages": true,
+    "modeCycle": true,
     "permissionMode": "bypassPermissions"
   }
 }
@@ -116,6 +117,7 @@ pi は何も確認せずにツールを実行します。これは Claude Code �
 |---|---|
 | `headerTitle` | ヘッダーの名前。`"Claude Code"` にもできる（バージョンは pi のもの） |
 | `header` / `spinner` / `turnDuration` / `prompt` / `tools` / `messages` | 各要素の置き換えを個別に止める |
+| `modeCycle` | shift+tab で権限モードを切り替える。`false` にすると shift+tab は pi の thinking レベル切り替えに戻る |
 | `permissionMode` | 起動時の権限モード（`default` / `acceptEdits` / `plan` / `bypassPermissions`） |
 
 ## pi 内部への変更
