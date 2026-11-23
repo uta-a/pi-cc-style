@@ -15,7 +15,7 @@
 import { isAbsolute, relative } from "node:path";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { countChanges, parseDiff, renderDiffRows } from "./diff.ts";
-import { renderGroupRow, type ToolGroups } from "./grouping.ts";
+import { renderGroupRows, type ToolGroups } from "./grouping.ts";
 import { clampLines, DOT, ELLIPSIS, moreLines, plural, sanitize, tildify } from "./format.ts";
 import { type Component, resultRows } from "./messages.ts";
 import type { Palette } from "./palette.ts";
@@ -390,7 +390,8 @@ export class CallRow implements Component {
 			const ids = this.grouping.groups.group(this.grouping.id);
 			if (ids) {
 				if (ids[0] !== this.grouping.id) return [];
-				return [truncateToWidth(renderGroupRow(this.palette(), this.grouping.groups, ids, this.grouping.expandKey()), width, "")];
+				const show = (target: string, kind: string) => (kind === "search" ? `"${target}"` : displayPath(target, this.cwd));
+				return clampLines(renderGroupRows(this.palette(), this.grouping.groups, ids, this.grouping.expandKey(), (t, k) => sanitize(show(t, k)).replace(/\n/g, " ")), width);
 			}
 		}
 		const args = sanitize(this.view.args(this.args ?? {}, { cwd: this.cwd, expanded: this.state.expanded }));

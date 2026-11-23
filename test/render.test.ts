@@ -345,29 +345,46 @@ test("! commands and compaction", () => {
 	assert.deepEqual(plain(renderCompaction(p, "line one", true, "ctrl+o", 80)), [`${dot} Compact summary`, "  \u23BF \u00A0line one"]);
 });
 
-test("reads and searches in a row collapse into one row", async () => {
-	const { ToolGroups, groupSummary, renderGroupRow } = await import("../extension/grouping.ts");
+test("reads and searches collapse into one row, a single one included", async () => {
+	const { ToolGroups, groupSummary, renderGroupRows } = await import("../extension/grouping.ts");
 	assert.equal(groupSummary({ search: 2, read: 3, list: 0 }, false), "Searched for 2 patterns, read 3 files");
 	assert.equal(groupSummary({ search: 0, read: 1, list: 0 }, true), "Reading 1 file…");
 	assert.equal(groupSummary({ search: 1, read: 0, list: 2 }, false), "Searched for 1 pattern, listed 2 directories");
 	const groups = new ToolGroups();
 	groups.add({ role: "user", content: "hi", timestamp: 1 });
 	groups.add({ role: "assistant", timestamp: 2, content: [
-		{ type: "toolCall", id: "a", name: "read" },
-		{ type: "toolCall", id: "b", name: "grep" },
+		{ type: "toolCall", id: "a", name: "read", arguments: { path: "src/a.ts" } },
+		{ type: "toolCall", id: "b", name: "grep", arguments: { pattern: "isExpired" } },
+		{ type: "toolCall", id: "a2", name: "read", arguments: { path: "src/a.ts" } },
 		{ type: "toolCall", id: "c", name: "bash" },
-		{ type: "toolCall", id: "d", name: "read" },
+		{ type: "toolCall", id: "d", name: "read", arguments: { path: "src/b.ts" } },
 	] });
-	groups.start({ role: "assistant", timestamp: 2, content: [{ type: "toolCall", id: "e", name: "find" }] });
-	assert.deepEqual(groups.group("a"), ["a", "b"]);
+	groups.start({ role: "assistant", timestamp: 2, content: [{ type: "toolCall", id: "e", name: "find", arguments: { pattern: "*.md" } }] });
+	assert.deepEqual(groups.group("a"), ["a", "b", "a2"]);
 	assert.equal(groups.group("c"), undefined);
 	assert.deepEqual(groups.group("e"), ["d", "e"]);
 	const done = { executionStarted: true, isPartial: false, isError: false, hasResult: true, expanded: false };
-	groups.setState("a", done);
-	groups.setState("b", done);
-	assert.equal(stripTerminalSequences(renderGroupRow(p, groups, ["a", "b"], "ctrl+o")).slice(2), "Searched for 1 pattern, read 1 file (ctrl+o to expand)");
+	for (const id of ["a", "b", "a2"]) groups.setState(id, done);
+	const finished = renderGroupRows(p, groups, ["a", "b", "a2"], "ctrl+o");
+	// Done: no dot, faint, the same file counted once.
+	assert.deepEqual(plain(finished), ["  Searched for 1 pattern, read 1 file (ctrl+o to expand)"]);
+	groups.setState("d", done);
+	groups.setState("e", { ...done, isPartial: true });
+	const running = plain(renderGroupRows(p, groups, ["d", "e"], "ctrl+o", (t, k) => (k === "search" ? `"${t}"` : t), 0));
+	assert.equal(running[0]!.slice(2), "Searching for 1 pattern, reading 1 file… (ctrl+o to expand)");
+	assert.equal(running[1], '  \u23BF \u00A0"*.md"');
+	// A single read collapses too.
+	const single = new ToolGroups();
+	single.add({ role: "assistant", content: [{ type: "toolCall", id: "x", name: "read", arguments: { path: "a" } }] });
+	assert.deepEqual(single.group("x"), ["x"]);
 	groups.update({ role: "assistant", timestamp: 2, content: [{ type: "text", text: "x" }, { type: "toolCall", id: "e", name: "find" }] });
-	assert.equal(groups.group("e"), undefined);
+	assert.deepEqual(groups.group("e"), ["e"]);
+	// A compaction ends a run.
+	const compacted = new ToolGroups();
+	compacted.add({ role: "assistant", content: [{ type: "toolCall", id: "r1", name: "read" }] });
+	compacted.addBreak();
+	compacted.add({ role: "assistant", content: [{ type: "toolCall", id: "r2", name: "read" }] });
+	assert.deepEqual(compacted.group("r2"), ["r2"]);
 });
 
 test("hard wrap never exceeds the width, keeps styles and stays linear", () => {

@@ -26,7 +26,7 @@
 | 結果行 | `Wn` `At` | `  ⎿ ` + NBSP、続く行は5列 | `extension/messages.ts`（`resultRows`） |
 | Read / Write / Edit / Search | 各ツールの `renderToolResultMessage` | `Read N lines`、`Wrote N lines to path`、`Added N lines, removed M lines`、`Found N files` | `extension/tools.ts` |
 | Bash の出力 | `Lyi` `nW` | 幅-10で折り返し、3行（残り1行なら4行）、`(No output)` | `extension/tools.ts`（`truncatedOutput`） |
-| まとめ表示 | `gZo` `ao` | `Searched for N patterns, read N files` / 進行中は `-ing` と `…` | `extension/grouping.ts` |
+| まとめ表示 | `collapsed_read_search` → `oc` / `Ey`、`oo`、`R9e`（集計） | 1件からまとめる、終了後は点なしで dim、件数 bold、read は `readFilePaths.size`、進行中は `-ing` と `…` と直近の対象（`latestDisplayHint`） | `extension/grouping.ts` |
 | diff | color-diff（`ee` `Te` `We` `_e` `ue` `He` `Pe`） | ガター ` N `、記号、行背景、語の強調（0.4 以下）、幅 `columns-12`、Monokai Extended / GitHub | `extension/diff.ts` |
 | スピナー | `Iya` `De` `Omt` `i7n` `On` `Ln` `Oya` `$n` `tt` `Wse` `PIt` | 本文冒頭の説明のとおり | `extension/spinner.ts` |
 | 動詞 | `b`（185語）、`jy`（8語）、`Wy`、`fse` | 一覧とハッシュによる選び方 | `extension/format.ts` |

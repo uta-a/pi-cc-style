@@ -1,14 +1,16 @@
 /**
- * Claude Code collapses a run of read and search calls into one row while the transcript is not
- * expanded (`gZo` / the grouped-tool row of 2.1.330):
+ * Claude Code collapses a run of read and search calls, a single one included, into one row while
+ * the transcript is not expanded (`collapsed_read_search` → `oc` / `Ey` of 2.1.330):
  *
- *   ⏺ Searched for 2 patterns, read 3 files (ctrl+o to expand)
- *   ⏺ Searching for 1 pattern, reading 2 files…              (while running)
+ *     Searched for 2 patterns, read 3 files (ctrl+o to expand)        (done: no dot, all faint)
+ *   ⏺ Searching for 1 pattern, reading 2 files… (ctrl+o to expand)   (running: the tool dot)
+ *     ⎿  src/session.ts                                              (running: the latest target)
  *
- * The first call of a run draws that row and the others draw nothing. A run is broken by assistant
- * text, a user message, or any other tool call. ctrl+o shows every call again.
+ * Counts are bold; files read are counted once per path. The first call of a run draws the row and
+ * the others draw nothing. A run is broken by assistant text, a user message, a compaction, or any
+ * other tool call. ctrl+o shows every call again.
  */
-import { DOT, plural } from "./format.ts";
+import { DOT, plural, RESULT_PREFIX } from "./format.ts";
 import type { Palette } from "./palette.ts";
 import type { ToolCallState } from "./tools.ts";
 
@@ -19,13 +21,20 @@ export const COLLAPSIBLE: Record<string, "search" | "read" | "list"> = {
 	ls: "list",
 };
 
-type Entry = { kind: "tool"; id: string; name: string } | { kind: "break" };
+type Entry = { kind: "tool"; id: string; name: string; target?: string } | { kind: "break" };
 
 interface ContentLike {
 	type: string;
 	text?: string;
 	id?: string;
 	name?: string;
+	arguments?: Record<string, unknown>;
+}
+
+/** What a call reads or searches for: the path of a read / ls, the pattern of a grep / find. */
+function targetOf(name: string, args: Record<string, unknown> | undefined): string | undefined {
+	const value = COLLAPSIBLE[name] === "search" ? args?.pattern : (args?.path ?? args?.file_path);
+	return typeof value === "string" && value ? value : undefined;
 }
 
 interface MessageLike {
@@ -39,6 +48,7 @@ export class ToolGroups {
 	private readonly order: string[] = [];
 	private readonly states = new Map<string, ToolCallState>();
 	private groupOf = new Map<string, string[]>();
+	private calls = new Map<string, { name: string; target?: string }>();
 	private dirty = true;
 
 	reset() {
@@ -48,6 +58,14 @@ export class ToolGroups {
 		this.order.length = 0;
 		this.states.clear();
 		this.groupOf.clear();
+		this.calls.clear();
+		this.dirty = true;
+	}
+
+	/** A non-message entry of the session (a compaction) that ends a run. */
+	addBreak() {
+		this.messages.set(`m${++this.seq}`, [{ kind: "break" }]);
+		this.order.push(`m${this.seq}`);
 		this.dirty = true;
 	}
 
@@ -78,9 +96,11 @@ export class ToolGroups {
 		if (message.role === "assistant" && Array.isArray(message.content)) {
 			for (const block of message.content as ContentLike[]) {
 				if (block.type === "text" && block.text?.trim()) entries.push({ kind: "break" });
-				else if (block.type === "toolCall" && block.id && block.name) entries.push({ kind: "tool", id: block.id, name: block.name });
+				else if (block.type === "toolCall" && block.id && block.name) {
+					entries.push({ kind: "tool", id: block.id, name: block.name, target: targetOf(block.name, block.arguments) });
+				}
 			}
-		} else if (message.role === "user" || message.role === "bashExecution" || message.role === "custom") {
+		} else if (message.role === "user" || message.role === "bashExecution" || message.role === "custom" || message.role === "compactionSummary") {
 			entries.push({ kind: "break" });
 		} else {
 			return;
@@ -98,13 +118,15 @@ export class ToolGroups {
 		if (!this.dirty) return;
 		this.dirty = false;
 		this.groupOf = new Map();
+		this.calls = new Map();
 		let run: string[] = [];
 		const flush = () => {
-			if (run.length >= 2) for (const id of run) this.groupOf.set(id, run);
+			if (run.length >= 1) for (const id of run) this.groupOf.set(id, run);
 			run = [];
 		};
 		for (const key of this.order) {
 			for (const entry of this.messages.get(key) ?? []) {
+				if (entry.kind === "tool") this.calls.set(entry.id, { name: entry.name, target: entry.target });
 				if (entry.kind === "tool" && COLLAPSIBLE[entry.name]) run.push(entry.id);
 				else flush();
 			}
@@ -119,10 +141,13 @@ export class ToolGroups {
 	}
 
 	nameOf(id: string): string | undefined {
-		for (const entries of this.messages.values()) {
-			for (const entry of entries) if (entry.kind === "tool" && entry.id === id) return entry.name;
-		}
-		return undefined;
+		this.rebuild();
+		return this.calls.get(id)?.name;
+	}
+
+	targetOf(id: string): string | undefined {
+		this.rebuild();
+		return this.calls.get(id)?.target;
 	}
 
 	stateOf(id: string): ToolCallState | undefined {
@@ -130,37 +155,62 @@ export class ToolGroups {
 	}
 }
 
-/** `ao` + `gZo`: "Searched for 2 patterns, read 3 files" / "Searching for …, reading ……". */
-export function groupSummary(counts: { search: number; read: number; list: number }, running: boolean): string {
-	const parts: string[] = [];
+/** `ao` + `oo`: "Searched for 2 patterns, read 3 files" / "Searching for …, reading ……". Counts are marked. */
+export function groupSummaryParts(counts: { search: number; read: number; list: number }, running: boolean): { text: string; count?: boolean }[] {
+	const parts: { text: string; count?: boolean }[] = [];
 	const add = (verb: string, count: number, noun: string) => {
+		if (parts.length > 0) parts.push({ text: ", " });
 		const word = parts.length === 0 ? verb[0]!.toUpperCase() + verb.slice(1) : verb;
-		parts.push(`${word} ${count} ${plural(count, noun)}`);
+		parts.push({ text: `${word} ` }, { text: String(count), count: true }, { text: ` ${plural(count, noun)}` });
 	};
 	if (counts.search > 0) add(running ? "searching for" : "searched for", counts.search, "pattern");
 	if (counts.read > 0) add(running ? "reading" : "read", counts.read, "file");
 	if (counts.list > 0) add(running ? "listing" : "listed", counts.list, "directory");
-	const text = parts.join(", ");
-	return running ? `${text}…` : text;
+	if (running) parts.push({ text: "…" });
+	return parts;
 }
 
-export function renderGroupRow(p: Palette, groups: ToolGroups, ids: string[], expandKey: string, now = Date.now()): string {
+export function groupSummary(counts: { search: number; read: number; list: number }, running: boolean): string {
+	return groupSummaryParts(counts, running)
+		.map((part) => part.text)
+		.join("");
+}
+
+/** The row (and, while running, the latest target under the elbow) for a collapsed run. */
+export function renderGroupRows(
+	p: Palette,
+	groups: ToolGroups,
+	ids: string[],
+	expandKey: string,
+	displayTarget: (target: string, kind: "search" | "read" | "list") => string = (t) => t,
+	now = Date.now(),
+): string[] {
 	const counts = { search: 0, read: 0, list: 0 };
+	const paths = new Set<string>();
 	let running = false;
-	let error = false;
 	let started = false;
+	let latest: { target: string; kind: "search" | "read" | "list" } | undefined;
 	for (const id of ids) {
 		const kind = COLLAPSIBLE[groups.nameOf(id) ?? ""];
-		if (kind) counts[kind]++;
+		const target = groups.targetOf(id);
+		if (kind === "read") paths.add(target ?? id);
+		else if (kind) counts[kind]++;
+		if (kind && target) latest = { target, kind };
 		const state = groups.stateOf(id);
 		if (!state || state.isPartial) running = true;
 		if (state?.executionStarted) started = true;
-		if (state?.isError && !state.isPartial) error = true;
 	}
-	let dot: string;
-	if (!running) dot = p.fg(error ? "error" : "success", DOT);
-	else if (!started) dot = p.dim(DOT);
-	else dot = Math.floor(now / 600) % 2 === 0 ? p.dim(DOT) : " ";
-	const text = groupSummary(counts, running);
-	return running ? `${dot} ${text}` : `${dot} ${text} ${p.dim(`(${expandKey} to expand)`)}`;
+	counts.read = paths.size;
+	const parts = groupSummaryParts(counts, running);
+	const hint = ` (${expandKey} to expand)`;
+	if (!running) {
+		// Done: no dot, the whole row faint with the counts bold.
+		const text = parts.map((part) => p.style(part.text, { dim: true, bold: part.count })).join("");
+		return [`  ${text}${p.dim(hint)}`];
+	}
+	const dot = !started ? p.dim(DOT) : Math.floor(now / 600) % 2 === 0 ? p.dim(DOT) : " ";
+	const text = parts.map((part) => (part.count ? p.bold(part.text) : part.text)).join("");
+	const rows = [`${dot} ${text}${p.dim(hint)}`];
+	if (latest) rows.push(`${p.dim(RESULT_PREFIX)}${p.dim(displayTarget(latest.target, latest.kind))}`);
+	return rows;
 }

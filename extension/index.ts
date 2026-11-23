@@ -317,12 +317,14 @@ export default function piCcStyle(pi: ExtensionAPI) {
 		for (const entry of ctx.sessionManager.getBranch()) {
 			const message = (entry as { type?: string; message?: { role?: string; content?: unknown; timestamp?: number } }).message;
 			if (entry.type === "message" && message) groups.add(message);
+			else if (entry.type === "compaction") groups.addBreak();
 		}
 		if (!ctx.hasUI) return;
 		for (const warning of settingsWarnings) ctx.ui.notify(`pi-cc-style: ${warning}`, "warning");
 		installUi(ctx);
 	});
 
+	pi.on("session_compact", () => groups.addBreak());
 	pi.on("model_select", () => requestRender());
 	pi.on("thinking_level_select", () => requestRender());
 

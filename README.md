@@ -13,7 +13,7 @@ pi の見た目と UI の挙動を Claude Code 2.1.330 に合わせる pi 拡張
 
 ⏺ I'll look at the session module first.
 
-⏺ Searched for 2 patterns, read 1 file (ctrl+o to expand)
+  Searched for 2 patterns, read 1 file (ctrl+o to expand)
 
 ⏺ Update(src/session.ts)
   ⎿  Added 1 line, removed 1 line
@@ -42,7 +42,7 @@ pi の見た目と UI の挙動を Claude Code 2.1.330 に合わせる pi 拡張
 | thinking | `∴` と、空白をまとめた thinking を薄い斜体で表示 |
 | ツール行 | `⏺ Read(path)`。点は待機中は薄く、実行中は 600ms ごとに点滅、終了で success / error。結果は `  ⎿  ` の下に出す |
 | ツールの要約 | `Read N lines`、`Found N lines` / `files`、`Wrote N lines to path` とプレビュー10行、`Added N lines, removed M lines` と diff、Bash の出力は幅-10で折り返して先頭3行と `… +N lines (ctrl+o to expand)` |
-| まとめ表示 | 連続した read / grep / find / ls（2件以上）を `Searched for N patterns, read N files (ctrl+o to expand)` の1行にまとめる。ctrl+o で個別表示 |
+| まとめ表示 | 連続した read / grep / find / ls（1件から）を `Searched for N patterns, read N files (ctrl+o to expand)` の1行にまとめる。終わると点を消して行全体を薄く、件数は太字、同じファイルは1件と数える。実行中は点と、直近の対象を `⎿` の下に出す。ctrl+o で個別表示 |
 | diff | 行番号のガター、追加・削除行の背景、変更が4割以下の組は変わった語だけ強調、長い行は折り返し |
 | スピナー | `· ✢ ✳ ✶ ✻ ✽` を2秒周期で往復、動詞185語から1つ、3文字のきらめき、10秒無応答で error 色へ、thinking が長いと warning 色へ。括弧内は経過時間・`↓ N tokens`・thinking の状態（`still thinking`、`thought for Ns` など）を幅に収まる分だけ |
 | ターン終了 | `✻ Cooked for 1m 5s`（動詞8語からメッセージごとに決まる） |
