@@ -30,6 +30,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, type TUI } from "@earendil-works/pi-tui";
 import { decorateEditor } from "./editor.ts";
+import { COLLAPSIBLE, ToolGroups } from "./grouping.ts";
 import { PROMPT_EXAMPLES, tildify } from "./format.ts";
 import { renderHeader } from "./header.ts";
 import { Lines, patchExtras, patchMessages } from "./messages.ts";
@@ -125,6 +126,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 	}
 
 	const spinner = new SpinnerState();
+	const groups = new ToolGroups();
 	const permissions: PermissionState = { mode: getSettings().permissionMode, allowedCommands: new Set() };
 	let tui: TUI | undefined;
 	let ticker: ReturnType<typeof setInterval> | undefined;
@@ -170,6 +172,10 @@ export default function piCcStyle(pi: ExtensionAPI) {
 					hasResult: !context.isPartial,
 					expanded: context.expanded,
 				};
+				if (COLLAPSIBLE[toolName]) {
+					row.grouping = { id: context.toolCallId, groups, expandKey: () => context.keyText?.("app.tools.expand") || "ctrl+o" };
+					groups.setState(context.toolCallId, row.state);
+				}
 				return row;
 			},
 			renderResult(result, options, _theme, context) {
@@ -184,7 +190,9 @@ export default function piCcStyle(pi: ExtensionAPI) {
 						hasResult: !options.isPartial,
 						expanded: options.expanded,
 					};
+					if (COLLAPSIBLE[toolName]) groups.setState(context.toolCallId, state.call.state);
 				}
+				rows.collapsed = () => Boolean(COLLAPSIBLE[toolName] && !options.expanded && groups.group(context.toolCallId));
 				const expandKey = context.keyText?.("app.tools.expand") || "ctrl+o";
 				const args = (context.args ?? {}) as Record<string, unknown>;
 				rows.draw = (width) =>
@@ -290,6 +298,11 @@ export default function piCcStyle(pi: ExtensionAPI) {
 			.getBranch()
 			.some((entry) => entry.type === "message" && (entry as { message?: { role?: string } }).message?.role === "user");
 		placeholder = pickExample(ctx.cwd);
+		groups.reset();
+		for (const entry of ctx.sessionManager.getBranch()) {
+			const message = (entry as { type?: string; message?: { role?: string; content?: unknown; timestamp?: number } }).message;
+			if (entry.type === "message" && message) groups.add(message);
+		}
 		if (!ctx.hasUI) return;
 		installUi(ctx);
 	});
@@ -312,11 +325,14 @@ export default function piCcStyle(pi: ExtensionAPI) {
 		startTicker();
 	});
 	pi.on("message_start", (event) => {
+		groups.start(event.message as never);
 		const role = (event.message as { role?: string }).role;
 		if (role === "user") hasUserMessage = true;
 		if (role === "assistant") spinner.request(Date.now());
 	});
+	pi.on("message_end", (event) => groups.update(event.message as never));
 	pi.on("message_update", (event) => {
+		groups.update(event.message as never);
 		const e = event.assistantMessageEvent as { type: string; delta?: string };
 		const length = typeof e.delta === "string" ? e.delta.length : 0;
 		if (e.type === "text_delta") spinner.delta("text", length, Date.now());

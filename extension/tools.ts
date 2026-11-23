@@ -15,6 +15,7 @@
 import { isAbsolute, relative } from "node:path";
 import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { countChanges, parseDiff, renderDiffRows } from "./diff.ts";
+import { renderGroupRow, type ToolGroups } from "./grouping.ts";
 import { DOT, ELLIPSIS, moreLines, plural, tildify } from "./format.ts";
 import { type Component, resultRows } from "./messages.ts";
 import type { Palette } from "./palette.ts";
@@ -317,6 +318,8 @@ export class CallRow implements Component {
 	args: Record<string, unknown> = {};
 	state: ToolCallState = { executionStarted: false, isPartial: true, isError: false, hasResult: false, expanded: false };
 	cwd: string;
+	/** Set for calls that may be collapsed with neighbouring reads and searches. */
+	grouping?: { id: string; groups: ToolGroups; expandKey: () => string };
 	private readonly palette: () => Palette;
 	constructor(view: ToolView, cwd: string, palette: () => Palette) {
 		this.view = view;
@@ -324,6 +327,13 @@ export class CallRow implements Component {
 		this.palette = palette;
 	}
 	render(width: number): string[] {
+		if (this.grouping && !this.state.expanded) {
+			const ids = this.grouping.groups.group(this.grouping.id);
+			if (ids) {
+				if (ids[0] !== this.grouping.id) return [];
+				return [truncateToWidth(renderGroupRow(this.palette(), this.grouping.groups, ids, this.grouping.expandKey()), width, "")];
+			}
+		}
 		const args = this.view.args(this.args ?? {}, { cwd: this.cwd, expanded: this.state.expanded });
 		return callRow(this.palette(), this.state, this.view.name, args, width);
 	}
@@ -333,11 +343,14 @@ export class CallRow implements Component {
 /** Result rows under the elbow. */
 export class ResultRows implements Component {
 	draw: (width: number) => string[] = () => [];
+	/** Returns true while the call is folded into a group row. */
+	collapsed: () => boolean = () => false;
 	private readonly palette: () => Palette;
 	constructor(palette: () => Palette) {
 		this.palette = palette;
 	}
 	render(width: number): string[] {
+		if (this.collapsed()) return [];
 		const lines = fit(this.draw(width), width);
 		return lines.length > 0 ? resultRows(lines, this.palette()) : [];
 	}
