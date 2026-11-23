@@ -269,7 +269,7 @@ test("permission modes and prompt", () => {
 });
 
 test("turn summary and prompt footer", () => {
-	assert.deepEqual(plain(renderTurnSummary(p, { id: "abc", durationMs: 65_000 })), ["", `✻ ${turnVerb("abc")} for 1m 5s`]);
+	assert.deepEqual(plain(renderTurnSummary(p, { id: "abc", durationMs: 65_000 })), [`✻ ${turnVerb("abc")} for 1m 5s`]);
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "default", false)), "  ? for shortcuts");
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "default", true)), "  esc to interrupt");
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "acceptEdits", false)), "  accept edits · shift+tab to cycle");

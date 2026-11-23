@@ -13,8 +13,9 @@ export interface TurnEntryData {
 	durationMs: number;
 }
 
+/** The summary row; pi puts the blank line above custom entries itself. */
 export function renderTurnSummary(p: Palette, data: TurnEntryData): string[] {
-	return ["", `${p.dim(TEARDROP)} ${p.dim(`${turnVerb(data.id)} for ${formatDuration(data.durationMs)}`)}`];
+	return [`${p.dim(TEARDROP)} ${p.dim(`${turnVerb(data.id)} for ${formatDuration(data.durationMs)}`)}`];
 }
 
 /**

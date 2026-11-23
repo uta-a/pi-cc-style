@@ -80,8 +80,14 @@ function pickExample(cwd: string): string {
 export default function piCcStyle(pi: ExtensionAPI) {
 	if (isSubagentChild()) return;
 
-	const loadSettings = () => setSettings(readSettings((pi.getSettings() as Record<string, unknown>).ccStyle));
-	loadSettings();
+	// pi.getSettings() is unavailable while extensions load; settings are read at session_start.
+	const loadSettings = () => {
+		try {
+			setSettings(readSettings((pi.getSettings() as Record<string, unknown>).ccStyle));
+		} catch {
+			// Keep the current settings.
+		}
+	};
 
 	// Message rows (prototype patches; they follow the setting on every render).
 	patchMessages({ AssistantMessageComponent, UserMessageComponent } as never, palette, () => getSettings().messages);
@@ -109,6 +115,8 @@ export default function piCcStyle(pi: ExtensionAPI) {
 	let placeholder: string | undefined;
 	let unsubscribeInput: (() => void) | undefined;
 	let currentCtx: ExtensionContext | undefined;
+	/** A permission prompt is open; the hint row under the prompt hides meanwhile. */
+	let prompting = 0;
 
 	const requestRender = () => tui?.requestRender();
 	const startTicker = () => {
@@ -231,7 +239,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 				"cc-style-hints",
 				(widgetTui) => {
 					tui = widgetTui;
-					return new Lines(() => [renderPromptFooter(palette(), permissions.mode, spinner.active)]);
+					return new Lines(() => (prompting > 0 ? [] : [renderPromptFooter(palette(), permissions.mode, spinner.active)]));
 				},
 				{ placement: "belowEditor" },
 			);
@@ -320,7 +328,10 @@ export default function piCcStyle(pi: ExtensionAPI) {
 		if (!needsPrompt(permissions, event.toolName, input)) return undefined;
 		if (!ctx.hasUI) return { block: true, reason: "Permission required, but there is no UI to ask." };
 		const request = { toolName: event.toolName, input, cwd: ctx.cwd };
-		const answer = await ctx.ui.custom<{ value: "yes" | "yes-session" | "no"; feedback?: string }>((dialogTui, _theme, _kb, done) => {
+		prompting++;
+		requestRender();
+		const answer = await ctx.ui
+			.custom<{ value: "yes" | "yes-session" | "no"; feedback?: string }>((dialogTui, _theme, _kb, done) => {
 			let selected = 0;
 			let feedback: { active: boolean; text: string } | undefined;
 			return {
@@ -346,7 +357,11 @@ export default function piCcStyle(pi: ExtensionAPI) {
 					dialogTui.requestRender();
 				},
 			};
-		});
+		})
+			.finally(() => {
+				prompting--;
+				requestRender();
+			});
 		if (answer?.value === "yes") return undefined;
 		if (answer?.value === "yes-session") {
 			if (event.toolName === "bash") permissions.allowedCommands.add(commandPrefix(String(input.command ?? "")));
