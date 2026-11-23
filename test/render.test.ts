@@ -5,7 +5,7 @@ import { countChanges, pairRows, parseDiff, renderDiffRows, tokenize, wordRanges
 import { decorateEditor } from "../extension/editor.ts";
 import { formatDuration, formatNumber, formatTokens, moreLines, stringHash, turnVerb } from "../extension/format.ts";
 import { renderClawd, renderHeader, truncateStart } from "../extension/header.ts";
-import { Gutter, renderApiError, renderInterrupted, renderThinking, renderUserPrompt, updateAssistantContent } from "../extension/messages.ts";
+import { Gutter, renderApiError, renderBashRun, renderCompaction, renderInterrupted, renderThinking, renderUserPrompt, updateAssistantContent } from "../extension/messages.ts";
 import { Palette, rgbTo256, themeIdFor } from "../extension/palette.ts";
 import { commandPrefix, modePill, needsPrompt, nextMode, rejectReason, renderPermissionPrompt } from "../extension/permissions.ts";
 import { readSettings } from "../extension/runtime.ts";
@@ -273,4 +273,17 @@ test("turn summary and prompt footer", () => {
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "default", false)), "  ? for shortcuts");
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "default", true)), "  esc to interrupt");
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "acceptEdits", false)), "  accept edits · shift+tab to cycle");
+});
+
+test("! commands and compaction", () => {
+	const out = (text: string) => (text ? text.split("\n") : []);
+	const run = { command: "echo hi", outputLines: ["hi"], status: "complete" as const, expanded: false };
+	const lines = renderBashRun(p, run, 20, out);
+	assert.deepEqual(plain(lines), ["", "! echo hi           ", "  \u23BF \u00A0hi"]);
+	assert.ok(lines[1]!.includes("48;2;65;60;65"));
+	assert.deepEqual(plain(renderBashRun(p, { ...run, outputLines: [], status: "running" }, 20, out)).slice(2), ["  \u23BF \u00A0Running\u2026"]);
+	assert.deepEqual(plain(renderBashRun(p, { ...run, outputLines: [""], status: "error", exitCode: 2 }, 20, out)).slice(2), ["  \u23BF \u00A0Exit code 2"]);
+	const dot = process.platform === "darwin" ? "\u23FA" : "\u25CF";
+	assert.deepEqual(plain(renderCompaction(p, "s", false, "ctrl+o", 80)), [`${dot} Compact summary (ctrl+o to expand)`]);
+	assert.deepEqual(plain(renderCompaction(p, "line one", true, "ctrl+o", 80)), [`${dot} Compact summary`, "  \u23BF \u00A0line one"]);
 });

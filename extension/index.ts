@@ -16,12 +16,15 @@ import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
 import {
 	AssistantMessageComponent,
+	BashExecutionComponent,
+	CompactionSummaryMessageComponent,
 	CustomEditor,
 	type ExtensionAPI,
 	type ExtensionContext,
 	getLanguageFromPath,
 	highlightCode,
 	InteractiveMode,
+	keyText,
 	UserMessageComponent,
 	VERSION,
 } from "@earendil-works/pi-coding-agent";
@@ -29,7 +32,7 @@ import { Key, matchesKey, type TUI } from "@earendil-works/pi-tui";
 import { decorateEditor } from "./editor.ts";
 import { PROMPT_EXAMPLES, tildify } from "./format.ts";
 import { renderHeader } from "./header.ts";
-import { Lines, patchMessages } from "./messages.ts";
+import { Lines, patchExtras, patchMessages } from "./messages.ts";
 import {
 	needsPrompt,
 	nextMode,
@@ -41,7 +44,7 @@ import {
 } from "./permissions.ts";
 import { getSettings, isToolsExpanded, palette, readSettings, setSettings, setToolsExpanded, setUi } from "./runtime.ts";
 import { renderSpinner, SpinnerState } from "./spinner.ts";
-import { BUILTIN_VIEWS, CallRow, genericView, ResultRows, type ToolView } from "./tools.ts";
+import { BUILTIN_VIEWS, CallRow, fullOutput, genericView, ResultRows, type ToolView, truncatedOutput } from "./tools.ts";
 import { renderPromptFooter, renderTurnSummary, TURN_ENTRY, type TurnEntryData } from "./turn.ts";
 
 const isSubagentChild = () => process.env.PI_SUBAGENT_CHILD === "1" || Boolean(process.env.PI_SUBAGENT_PARENT_SESSION);
@@ -91,6 +94,20 @@ export default function piCcStyle(pi: ExtensionAPI) {
 
 	// Message rows (prototype patches; they follow the setting on every render).
 	patchMessages({ AssistantMessageComponent, UserMessageComponent } as never, palette, () => getSettings().messages);
+	const expandKey = () => {
+		try {
+			return keyText("app.tools.expand") || "ctrl+o";
+		} catch {
+			return "ctrl+o";
+		}
+	};
+	patchExtras(
+		{ BashExecutionComponent, CompactionSummaryMessageComponent } as never,
+		palette,
+		() => getSettings().messages,
+		(text, tone, width, expanded) => (expanded ? fullOutput(palette(), text, tone) : truncatedOutput(palette(), text, width, expandKey(), tone)),
+		expandKey,
+	);
 
 	// ctrl+o: Claude Code toggles the transcript without a notice.
 	const modeProto = InteractiveMode.prototype as unknown as Record<string | symbol, unknown>;

@@ -263,3 +263,83 @@ export function patchMessages(targets: PatchTargets, getPalette: () => Palette, 
 		return lines;
 	};
 }
+
+/* ------------------------------------------------------------------------------------------------ */
+/* `!` commands and compaction                                                                      */
+/* ------------------------------------------------------------------------------------------------ */
+
+export interface BashRunLike {
+	command: string;
+	outputLines: string[];
+	status: "running" | "complete" | "error" | "cancelled";
+	exitCode?: number | null;
+	expanded: boolean;
+}
+
+/**
+ * A `!` command: the input row (`! ` in `bashBorder` on `bashMessageBackgroundColor`, like a user
+ * prompt) and the output under the elbow, three lines unless expanded.
+ */
+export function renderBashRun(
+	p: Palette,
+	run: BashRunLike,
+	width: number,
+	output: (text: string, tone: "plain" | "error") => string[],
+): string[] {
+	const contentWidth = Math.max(1, width - 3);
+	const input = wrapTextWithAnsi(run.command, contentWidth).map((line, i) => {
+		const prefix = i === 0 ? `${p.fg("bashBorder", "!")} ` : "  ";
+		const content = prefix + line;
+		return p.bg("bashMessageBackgroundColor", content + " ".repeat(Math.max(0, width - visibleWidth(content))));
+	});
+	const text = run.outputLines.join("\n");
+	let rows: string[];
+	if (run.status === "running") rows = text.trim() ? output(text, "plain") : [p.dim("Running…")];
+	else if (run.status === "cancelled") rows = [...output(text, "plain"), p.dim("Interrupted")];
+	else {
+		rows = output(text, run.status === "error" ? "error" : "plain");
+		if (rows.length === 0) rows = [p.dim(run.status === "error" ? `Exit code ${run.exitCode}` : "(No output)")];
+	}
+	return ["", ...input, ...resultRows(rows, p)];
+}
+
+/** `⏺ Compact summary (ctrl+o to expand)`, the summary under the elbow when expanded. */
+export function renderCompaction(p: Palette, summary: string, expanded: boolean, expandKey: string, width: number): string[] {
+	const head = `${p.fg("text", DOT)} ${p.bold("Compact summary")}${expanded ? "" : ` ${p.dim(`(${expandKey} to expand)`)}`}`;
+	if (!expanded) return [truncateToWidth(head, width, "")];
+	const body = summary
+		.split("\n")
+		.flatMap((line) => (line ? wrapTextWithAnsi(line, Math.max(1, width - 5)) : [""]))
+		.map((line) => p.dim(line));
+	return [head, ...resultRows(body, p)];
+}
+
+interface ExtraTargets {
+	BashExecutionComponent: { prototype: Record<string | symbol, unknown> };
+	CompactionSummaryMessageComponent: { prototype: Record<string | symbol, unknown> };
+}
+
+const EXTRAS_PATCHED = Symbol.for("pi-cc-style.extras");
+
+export function patchExtras(
+	targets: ExtraTargets,
+	getPalette: () => Palette,
+	enabled: () => boolean,
+	output: (text: string, tone: "plain" | "error", width: number, expanded: boolean) => string[],
+	expandKey: () => string,
+) {
+	const bash = targets.BashExecutionComponent.prototype;
+	const compaction = targets.CompactionSummaryMessageComponent.prototype;
+	if (bash[EXTRAS_PATCHED]) return;
+	bash[EXTRAS_PATCHED] = true;
+	const bashRender = bash.render as (this: unknown, width: number) => string[];
+	bash.render = function (this: BashRunLike, width: number) {
+		if (!enabled()) return bashRender.call(this, width);
+		return renderBashRun(getPalette(), this, width, (text, tone) => output(text, tone, width, this.expanded));
+	};
+	const compactionRender = compaction.render as (this: unknown, width: number) => string[];
+	compaction.render = function (this: { message: { summary: string }; expanded: boolean }, width: number) {
+		if (!enabled()) return compactionRender.call(this, width);
+		return renderCompaction(getPalette(), this.message?.summary ?? "", this.expanded, expandKey(), width);
+	};
+}
