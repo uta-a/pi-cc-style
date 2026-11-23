@@ -48,10 +48,20 @@ export function readSettings(raw: unknown): StyleSettings {
 		if (typeof source[key] === "boolean") out[key] = source[key];
 	}
 	if (typeof source.headerTitle === "string" && source.headerTitle.trim()) out.headerTitle = source.headerTitle;
-	if (typeof source.permissionMode === "string" && (MODES as readonly string[]).includes(source.permissionMode)) {
-		out.permissionMode = source.permissionMode as StyleSettings["permissionMode"];
+	if (source.permissionMode !== undefined) {
+		const mode = source.permissionMode === "manual" ? "default" : source.permissionMode;
+		// A misspelt mode falls back to manual, not to bypass: a typo must not turn the prompts off.
+		out.permissionMode = typeof mode === "string" && (MODES as readonly string[]).includes(mode) ? (mode as StyleSettings["permissionMode"]) : "default";
 	}
 	return out;
+}
+
+/** What `readSettings` had to correct, for a notice at startup. */
+export function settingsProblems(raw: unknown): string[] {
+	if (!raw || typeof raw !== "object") return [];
+	const mode = (raw as Record<string, unknown>).permissionMode;
+	if (mode === undefined || mode === "manual" || (MODES as readonly unknown[]).includes(mode)) return [];
+	return [`ccStyle.permissionMode ${JSON.stringify(mode)} is not one of ${MODES.join(", ")}; using default (manual).`];
 }
 
 interface UiLike {

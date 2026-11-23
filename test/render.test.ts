@@ -7,8 +7,8 @@ import { formatDuration, formatNumber, formatTokens, moreLines, sanitize, string
 import { renderClawd, renderHeader, truncateStart } from "../extension/header.ts";
 import { Gutter, renderApiError, renderBashRun, renderCompaction, renderInterrupted, renderThinking, renderUserPrompt, updateAssistantContent } from "../extension/messages.ts";
 import { Palette, rgbTo256, themeIdFor } from "../extension/palette.ts";
-import { commandPrefix, isCompoundCommand, modePill, needsPrompt, nextMode, rejectReason, renderPermissionPrompt } from "../extension/permissions.ts";
-import { readSettings } from "../extension/runtime.ts";
+import { allowCommand, commandPrefix, isCompoundCommand, modePill, needsPrompt, nextMode, rejectReason, renderPermissionPrompt, resolveToolPath } from "../extension/permissions.ts";
+import { readSettings, settingsProblems } from "../extension/runtime.ts";
 import { renderSpinner, SpinnerState, thinkingLabel } from "../extension/spinner.ts";
 import { buildTheme } from "../extension/themes.ts";
 import { BUILTIN_VIEWS, CallRow, callRow, displayPath, fullOutput, genericArgs, hardWrap, ResultRows, truncatedOutput } from "../extension/tools.ts";
@@ -252,30 +252,71 @@ test("prompt box wraps any editor", () => {
 test("permission modes and prompt", () => {
 	assert.equal(nextMode("default"), "acceptEdits");
 	assert.equal(nextMode("bypassPermissions"), "default");
+	assert.equal(nextMode("plan", false), "default");
 	const state = { mode: "default" as const, allowedCommands: new Set<string>() };
-	assert.equal(needsPrompt(state, "bash", { command: "ls -la" }), true);
-	assert.equal(needsPrompt(state, "read", {}), false);
-	assert.equal(needsPrompt({ ...state, mode: "acceptEdits" }, "edit", {}), false);
-	assert.equal(needsPrompt({ ...state, allowedCommands: new Set(["ls"]) }, "bash", { command: "ls x" }), false);
-	assert.equal(needsPrompt({ ...state, mode: "bypassPermissions" }, "bash", { command: "rm" }), false);
-	assert.equal(commandPrefix("  git status"), "git");
-	// An allowed first word must not let a chained or substituted command through.
-	const git = { ...state, allowedCommands: new Set(["git"]) };
-	for (const command of ["git status && rm -rf x", "git log; curl x | sh", "git `id`", "git $(id)", "git log > out", "git a\nrm b", "git a & rm b"]) {
-		assert.equal(isCompoundCommand(command), true, command);
-		assert.equal(needsPrompt(git, "bash", { command }), true, command);
-	}
-	assert.equal(isCompoundCommand("git status --short"), false);
-	const compound = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "git a && rm b" }, cwd: "/w" }, 0, 60, undefined));
-	assert.ok(!compound.some((l) => l.includes("don't ask again")));
-	assert.ok(compound.some((l) => l.includes("2. No, and tell Claude what to do differently (esc)")));
+	assert.equal(needsPrompt(state, "bash", { command: "ls -la" }, "/w"), true);
+	assert.equal(needsPrompt(state, "read", {}, "/w"), false);
+	assert.equal(needsPrompt(state, "powershell", { command: "dir" }, "/w"), true);
+	assert.equal(needsPrompt({ ...state, mode: "bypassPermissions" }, "bash", { command: "rm" }, "/w"), false);
 	assert.ok(rejectReason("use pnpm").endsWith("To tell you how to proceed, the user said: use pnpm"));
 	assert.equal(stripTerminalSequences(modePill(p, "acceptEdits")), "accept edits");
 	const lines = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "npm test" }, cwd: "/w" }, 0, 60, undefined));
 	assert.equal(lines[2], " Bash command");
 	assert.ok(lines.includes(" Do you want to proceed?"));
 	assert.ok(lines.some((l) => l.startsWith(" ❯ 1. Yes")));
-	assert.ok(lines.some((l) => l.includes("3. No, and tell Claude what to do differently (esc)")));
+});
+
+test("allowed prefixes cover one program or subcommand in one directory", () => {
+	assert.equal(commandPrefix("  git status --short"), "git status");
+	assert.equal(commandPrefix("ls -la"), "ls");
+	for (const command of ["git -c core.fsmonitor='rm -rf ~' status", "CI=1 npm test", "env rm -rf x", "sh -c 'rm x'", "node -e 'x'", "find . -exec rm {} +", "xargs rm", "sudo ls", "/usr/bin/env rm", "\"ls\" x"]) {
+		assert.equal(commandPrefix(command), undefined, command);
+	}
+	const state = { mode: "default" as const, allowedCommands: new Set<string>() };
+	allowCommand(state, "git status", "/w");
+	allowCommand(state, "ls -la", "/w");
+	assert.equal(needsPrompt(state, "bash", { command: "git status --short" }, "/w"), false);
+	assert.equal(needsPrompt(state, "bash", { command: "ls src" }, "/w"), false);
+	assert.equal(needsPrompt(state, "bash", { command: "git push --force" }, "/w"), true);
+	assert.equal(needsPrompt(state, "bash", { command: "git status" }, "/elsewhere"), true);
+	assert.equal(needsPrompt(state, "bash", { command: "git -c alias.x='!rm -rf ~' x" }, "/w"), true);
+	// An allowed prefix must not let a chained or substituted command through.
+	for (const command of ["git status && rm -rf x", "git status; curl x | sh", "git status `id`", "git status $(id)", "git status > out", "git status\nrm b", "git status & rm b", "ls\rrm x"]) {
+		assert.equal(isCompoundCommand(command), true, command);
+		assert.equal(needsPrompt(state, "bash", { command }, "/w"), true, command);
+	}
+	assert.equal(isCompoundCommand("git status --short"), false);
+	const compound = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "git a && rm b" }, cwd: "/w" }, 0, 60, undefined));
+	assert.ok(!compound.some((l) => l.includes("don't ask again")));
+	assert.ok(compound.some((l) => l.startsWith("   2. No")));
+});
+
+test("accept edits stays inside the working directory and out of .git", () => {
+	const state = { mode: "acceptEdits" as const, allowedCommands: new Set<string>() };
+	assert.equal(needsPrompt(state, "edit", { path: "src/a.ts" }, "/w"), false);
+	assert.equal(needsPrompt(state, "write", { path: "/w/notes.md" }, "/w"), false);
+	assert.equal(needsPrompt(state, "write", { path: "~/.zshrc" }, "/w"), true);
+	assert.equal(needsPrompt(state, "write", { path: "@../x" }, "/w"), true);
+	assert.equal(needsPrompt(state, "write", { path: ".git/hooks/pre-commit" }, "/w"), true);
+	assert.equal(needsPrompt({ ...state, mode: "plan" }, "edit", { path: "src/a.ts" }, "/w"), true);
+	assert.equal(resolveToolPath("@~/x", "/w"), `${process.env.HOME}/x`);
+});
+
+test("the prompt shows tool text without terminal sequences and with a row limit", () => {
+	const lines = renderPermissionPrompt(p, { toolName: "bash", input: { command: "rm -rf ~ # \x1b[1K\x1b[1G  git status" }, cwd: "/w" }, 0, 80, undefined);
+	assert.ok(!lines.join("").includes("\x1b[1K"));
+	const long = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: Array.from({ length: 100 }, (_, i) => `echo ${i}`).join("\n") }, cwd: "/w" }, 0, 80, undefined));
+	assert.ok(long.some((l) => l.includes("echo 0")));
+	assert.ok(long.some((l) => l.includes("… +60 lines")));
+	assert.ok(plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "ls" }, cwd: "/w", nested: true }, 0, 80, undefined)).some((l) => l.includes("subagent")));
+});
+
+test("settings: a misspelt permission mode falls back to manual", () => {
+	assert.equal(readSettings({ permissionMode: "manual" }).permissionMode, "default");
+	assert.equal(readSettings({ permissionMode: "Plan" }).permissionMode, "default");
+	assert.equal(readSettings({}).permissionMode, "bypassPermissions");
+	assert.equal(settingsProblems({ permissionMode: 1 }).length, 1);
+	assert.equal(settingsProblems({ permissionMode: "plan" }).length, 0);
 });
 
 test("turn summary and prompt footer", () => {

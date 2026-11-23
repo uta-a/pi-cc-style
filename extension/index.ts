@@ -28,23 +28,24 @@ import {
 	UserMessageComponent,
 	VERSION,
 } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, type TUI } from "@earendil-works/pi-tui";
+import { Key, matchesKey, stripTerminalSequences, type TUI } from "@earendil-works/pi-tui";
 import { decorateEditor } from "./editor.ts";
 import { COLLAPSIBLE, ToolGroups } from "./grouping.ts";
-import { PROMPT_EXAMPLES, tildify } from "./format.ts";
+import { PROMPT_EXAMPLES, sanitize, tildify } from "./format.ts";
 import { renderHeader } from "./header.ts";
 import { CachedLines, Lines, patchExtras, patchMessages } from "./messages.ts";
 import {
+	allowCommand,
+	describeRequest,
 	needsPrompt,
 	nextMode,
 	type PermissionMode,
 	type PermissionState,
+	REJECT_MESSAGE,
 	rejectReason,
 	renderPermissionPrompt,
-	commandPrefix,
-	describeRequest,
 } from "./permissions.ts";
-import { getSettings, isToolsExpanded, palette, readSettings, setSettings, setToolsExpanded, setUi } from "./runtime.ts";
+import { getSettings, isToolsExpanded, palette, readSettings, setSettings, settingsProblems, setToolsExpanded, setUi } from "./runtime.ts";
 import { renderSpinner, SpinnerState } from "./spinner.ts";
 import { BUILTIN_VIEWS, CallRow, fullOutput, genericView, ResultRows, type ToolView, truncatedOutput } from "./tools.ts";
 import { renderPromptFooter, renderTurnSummary, TURN_ENTRY, type TurnEntryData } from "./turn.ts";
@@ -85,10 +86,13 @@ function pickExample(cwd: string): string {
 export default function piCcStyle(pi: ExtensionAPI) {
 	if (isSubagentChild()) return;
 
+	let settingsWarnings: string[] = [];
 	// pi.getSettings() is unavailable while extensions load; settings are read at session_start.
 	const loadSettings = () => {
 		try {
-			setSettings(readSettings((pi.getSettings() as Record<string, unknown>).ccStyle));
+			const raw = (pi.getSettings() as Record<string, unknown>).ccStyle;
+			setSettings(readSettings(raw));
+			settingsWarnings = settingsProblems(raw);
 		} catch {
 			// Keep the current settings.
 		}
@@ -293,7 +297,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 			unsubscribeInput = ctx.ui.onTerminalInput((data) => {
 				if (!matchesKey(data, Key.shift("tab"))) return undefined;
 				if (prompting > 0 || !promptEditor?.focused) return undefined;
-				permissions.mode = nextMode(permissions.mode);
+				permissions.mode = nextMode(permissions.mode, permissions.bypassAvailable);
 				requestRender();
 				return { consume: true };
 			});
@@ -303,6 +307,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		loadSettings();
 		permissions.mode = getSettings().permissionMode;
+		permissions.bypassAvailable = permissions.mode === "bypassPermissions";
 		permissions.allowedCommands.clear();
 		hasUserMessage = ctx.sessionManager
 			.getBranch()
@@ -314,6 +319,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 			if (entry.type === "message" && message) groups.add(message);
 		}
 		if (!ctx.hasUI) return;
+		for (const warning of settingsWarnings) ctx.ui.notify(`pi-cc-style: ${warning}`, "warning");
 		installUi(ctx);
 	});
 
@@ -342,7 +348,10 @@ export default function piCcStyle(pi: ExtensionAPI) {
 		groups.start(event.message as never);
 		const role = (event.message as { role?: string }).role;
 		if (role === "user") hasUserMessage = true;
-		if (role === "assistant") spinner.request(Date.now());
+		if (role === "assistant") {
+			spinner.request(Date.now());
+			declinedBatch = false;
+		}
 	});
 	pi.on("message_end", (event) => groups.update(event.message as never));
 	pi.on("message_update", (event) => {
@@ -353,8 +362,13 @@ export default function piCcStyle(pi: ExtensionAPI) {
 		else if (e.type === "thinking_delta") spinner.delta("thinking", length, Date.now());
 		else if (e.type === "toolcall_delta") spinner.delta("toolcall", length, Date.now());
 	});
-	pi.on("tool_execution_start", () => spinner.toolStart(Date.now()));
-	pi.on("tool_execution_end", () => spinner.toolEnd(Date.now()));
+	// Calls made by other tools (subagents, codemode) are not the main turn's tool use.
+	pi.on("tool_execution_start", (event) => {
+		if (!(event as { parentToolCallId?: string }).parentToolCallId) spinner.toolStart(Date.now());
+	});
+	pi.on("tool_execution_end", (event) => {
+		if (!(event as { parentToolCallId?: string }).parentToolCallId) spinner.toolEnd(Date.now());
+	});
 	pi.on("agent_end", (event) => {
 		const startedAt = turnStartedAt;
 		turnStartedAt = undefined;
@@ -370,53 +384,81 @@ export default function piCcStyle(pi: ExtensionAPI) {
 	});
 
 	// Permission prompt.
+	/** The user declined a call of the current response; its remaining calls are declined too. */
+	let declinedBatch = false;
 	pi.on("tool_call", async (event, ctx) => {
 		const input = (event.input ?? {}) as Record<string, unknown>;
-		if (!needsPrompt(permissions, event.toolName, input)) return undefined;
+		const nested = Boolean((event as { parentToolCallId?: string }).parentToolCallId);
+		if (declinedBatch && !nested) return { block: true, reason: REJECT_MESSAGE, terminate: true };
+		if (!needsPrompt(permissions, event.toolName, input, ctx.cwd)) return undefined;
 		if (!ctx.hasUI) return { block: true, reason: "Permission required, but there is no UI to ask." };
-		const request = { toolName: event.toolName, input, cwd: ctx.cwd };
-		const values = describeRequest(palette(), request, 80).options.map((option) => option.value);
+		const request = { toolName: event.toolName, input, cwd: ctx.cwd, nested };
+		const options = describeRequest(palette(), request, 80).options;
+		const values = options.map((option) => option.value);
+		let answer: { value: "yes" | "yes-session" | "no"; feedback?: string } | undefined;
 		prompting++;
 		requestRender();
-		const answer = await ctx.ui
-			.custom<{ value: "yes" | "yes-session" | "no"; feedback?: string }>((dialogTui, _theme, _kb, done) => {
-			let selected = 0;
-			let feedback: { active: boolean; text: string } | undefined;
-			return {
-				render: (width: number) => renderPermissionPrompt(palette(), request, selected, width, feedback, highlightLine),
-				invalidate() {},
-				handleInput(data: string) {
-					if (feedback?.active) {
-						if (matchesKey(data, Key.escape)) feedback = undefined;
-						else if (matchesKey(data, Key.enter)) return done({ value: "no", feedback: feedback.text });
-						else if (matchesKey(data, Key.backspace)) feedback.text = feedback.text.slice(0, -1);
-						else if (data.length === 1 && data >= " ") feedback.text += data;
-						else if (data.length > 1 && !data.startsWith("\x1b")) feedback.text += data;
-						dialogTui.requestRender();
-						return;
-					}
-					if (matchesKey(data, Key.up)) selected = (selected + values.length - 1) % values.length;
-					else if (matchesKey(data, Key.down)) selected = (selected + 1) % values.length;
-					else if (matchesKey(data, Key.tab)) feedback = { active: true, text: "" };
-					else if (matchesKey(data, Key.shift("tab")) && event.toolName !== "bash") return done({ value: "yes-session" });
-					else if (matchesKey(data, Key.escape)) return done({ value: "no" });
-					else if (/^[1-9]$/.test(data) && Number(data) <= values.length) return done({ value: values[Number(data) - 1]! });
-					else if (matchesKey(data, Key.enter)) return done({ value: values[selected]! });
-					dialogTui.requestRender();
-				},
-			};
-		})
-			.finally(() => {
-				prompting--;
-				requestRender();
-			});
+		try {
+			if (ctx.mode !== "tui") {
+				// RPC and JSON clients get a plain choice instead of the terminal component.
+				const labels = options.map((option) => stripTerminalSequences(option.label));
+				const d = describeRequest(palette(), request, 80);
+				const picked = await ctx.ui.select(stripTerminalSequences(`${d.title}: ${d.question}`), labels);
+				const at = picked === undefined ? -1 : labels.indexOf(picked);
+				answer = { value: at >= 0 ? values[at]! : "no" };
+			} else {
+				answer = await ctx.ui.custom<{ value: "yes" | "yes-session" | "no"; feedback?: string }>((dialogTui, _theme, _kb, done) => {
+					let selected = 0;
+					let feedback: { active: boolean; text: string } | undefined;
+					// Keys typed just before the prompt opened (a steering message, Enter) must not answer it.
+					const openedAt = Date.now();
+					let cache: { key: string; palette: unknown; lines: string[] } | undefined;
+					return {
+						render(width: number) {
+							const p = palette();
+							const key = [width, selected, feedback?.active, feedback?.text].join("\0");
+							if (cache?.key === key && cache.palette === p) return cache.lines;
+							cache = { key, palette: p, lines: renderPermissionPrompt(p, request, selected, width, feedback, highlightLine) };
+							return cache.lines;
+						},
+						invalidate() {
+							cache = undefined;
+						},
+						handleInput(data: string) {
+							if (Date.now() - openedAt < 300) return;
+							if (feedback?.active) {
+								if (matchesKey(data, Key.escape)) feedback = undefined;
+								else if (matchesKey(data, Key.enter)) return done({ value: "no", feedback: feedback.text });
+								else if (matchesKey(data, Key.backspace)) feedback.text = feedback.text.slice(0, -1);
+								else if (data.length === 1 && data >= " ") feedback.text += data;
+								else if (data.length > 1 && !data.startsWith("\x1b")) feedback.text += sanitize(data);
+								dialogTui.requestRender();
+								return;
+							}
+							if (matchesKey(data, Key.up)) selected = (selected + values.length - 1) % values.length;
+							else if (matchesKey(data, Key.down)) selected = (selected + 1) % values.length;
+							else if (matchesKey(data, Key.tab)) feedback = { active: true, text: "" };
+							else if (matchesKey(data, Key.shift("tab")) && values.includes("yes-session") && event.toolName !== "bash") return done({ value: "yes-session" });
+							else if (matchesKey(data, Key.escape)) return done({ value: "no" });
+							else if (/^[1-9]$/.test(data) && Number(data) <= values.length) return done({ value: values[Number(data) - 1]! });
+							else if (matchesKey(data, Key.enter)) return done({ value: values[selected]! });
+							dialogTui.requestRender();
+						},
+					};
+				});
+			}
+		} finally {
+			prompting--;
+			requestRender();
+		}
 		if (answer?.value === "yes") return undefined;
 		if (answer?.value === "yes-session") {
-			if (event.toolName === "bash") permissions.allowedCommands.add(commandPrefix(String(input.command ?? "")));
+			if (event.toolName === "bash") allowCommand(permissions, String(input.command ?? ""), ctx.cwd);
 			else permissions.mode = "acceptEdits";
 			requestRender();
 			return undefined;
 		}
+		if (!nested) declinedBatch = true;
 		return { block: true, reason: rejectReason(answer?.feedback), terminate: true };
 	});
 
@@ -427,12 +469,14 @@ export default function piCcStyle(pi: ExtensionAPI) {
 				.filter((m) => m.startsWith(prefix))
 				.map((m) => ({ value: m, label: m })),
 		handler: async (args, ctx) => {
-			const mode = args.trim() as PermissionMode;
+			const arg = args.trim();
+			const mode = (arg === "manual" ? "default" : arg) as PermissionMode;
 			if (!["default", "acceptEdits", "plan", "bypassPermissions"].includes(mode)) {
 				ctx.ui.notify(`Permission mode: ${permissions.mode}`, "info");
 				return;
 			}
 			permissions.mode = mode;
+			if (mode === "bypassPermissions") permissions.bypassAvailable = true;
 			requestRender();
 		},
 	});

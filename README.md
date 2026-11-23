@@ -88,13 +88,18 @@ pi は何も確認せずにツールを実行します。これは Claude Code �
 | plan | bash、edit、write |
 | bypass permissions | なし |
 
-- 入力欄にフォーカスがあるとき、shift+tab で順に切り替えます。`/cc-mode <mode>` でも指定できます。pi の shift+tab（thinking レベルの切り替え）はこの拡張が受け取ります。thinking レベルを shift+tab で変えたい場合は `"modeCycle": false` にしてください
-- 確認ダイアログ: `1` / `2` / `3` か ↑↓ と Enter。`2` は bash ならそのコマンドの先頭の語をセッション中は許可（複合コマンドを除く）、edit / write なら accept edits に切り替えます（ダイアログ内の shift+tab も同じ）。`3` か Esc で拒否すると、Claude Code と同じ文面（止まってユーザーの指示を待つよう求めるもの）をツールの結果としてモデルに返し、ターンの終了を要求します。同時に実行された他のツールが成功した場合、pi はターンを続けます。Tab で理由を書き添えられます
+- 入力欄にフォーカスがあるとき、shift+tab で順に切り替えます。`/cc-mode <mode>` でも指定できます（`manual` は `default` の別名）。Claude Code と同じく、bypass permissions が循環に入るのは、起動時のモードが bypass permissions だった場合と `/cc-mode bypassPermissions` で選んだ場合だけです。pi の shift+tab（thinking レベルの切り替え）はこの拡張が受け取ります。thinking レベルを shift+tab で変えたい場合は `"modeCycle": false` にしてください
+- 確認ダイアログ: `1` / `2` / `3` か ↑↓ と Enter。ダイアログが開いてから 300ms のあいだのキーは無視します（入力中の Enter で承認されないように）。`3` か Esc で拒否すると、Claude Code と同じ文面（止まってユーザーの指示を待つよう求めるもの）をツールの結果としてモデルに返し、ターンの終了を要求します。同じ応答に含まれる残りのツール呼び出しも、確認せずに拒否します。Tab で理由を書き添えられます
+- `2` は、edit / write なら accept edits に切り替えます（ダイアログ内の shift+tab も同じ）。bash なら、そのコマンドのプレフィックスを、そのセッション・その作業ディレクトリに限って許可します
+  - プレフィックスはプログラム名です。git、npm、cargo、docker などサブコマンドを持つものは `git status` のように2語で、`git push` は別に確認します
+  - 次のコマンドには `2` を出しません（常に確認します）: `;` `&` `|` `<` `>` バッククォート `$(` 改行を含むもの、先頭に `VAR=1` があるもの、`env` / `sh` / `bash` / `eval` / `xargs` / `sudo` / `find` / `sed` / `awk` / `node` / `python` などほかのプログラムやコードを実行できるもの、サブコマンドの前にフラグがあるもの（`git -c …`）
+  - それでも許可は文字列の前方一致です。`npm run` を許可すると package.json のどのスクリプトも実行されます。安全性の判断には使わず、手間を減らすためのものと考えてください
+- accept edits で確認なしになるのは、作業ディレクトリの中のファイルだけです。外側のファイルと `.git/` の中は確認します。パスは pi と同じく `~` と先頭の `@` を展開して判定します（シンボリックリンクの先は見ません）
 - plan モードは確認の対象だけを切り替えます。Claude Code の plan モードが持つ「計画だけを立てる」指示はシステムプロンプトの機能なので含めていません
-- read / grep / find / ls と、他の拡張のツールは確認しません
-- `;` `&` `|` `<` `>` バッククォート `$(` 改行を含む bash コマンドは、先頭の語を許可していても必ず確認します。このときの選択肢は Yes / No の2つです（`git` を許可したときに `git status && rm -rf x` が通らないようにするため）
-- 許可は先頭の語だけで判定します。`git` を許可すると `git push --force` も確認なしで実行されます
-- サブエージェントの子（pi-cc-subagent が起動するもの）ではこの拡張は動かないため、どのモードでも子の bash / edit / write は確認なしで実行されます
+- 確認の対象は bash、powershell、edit、write です。read / grep / find / ls、MCP のツール、サブエージェントを起動するツール、他の拡張のツールは確認しません
+- サブエージェント（pi-cc-subagent）や codemode のスクリプトがツールの中から呼んだ bash / edit / write も、同じ規則で確認します。このときダイアログに「Requested by a subagent or another tool」と出ます。バックグラウンドのサブエージェントの確認は、入力中でも割り込んで開きます
+- RPC など TUI 以外のモードでは、選択肢を pi の select で尋ねます。UI のない print モードでは、確認が必要な呼び出しはすべて拒否します
+- 承認した後に、別の拡張の `tool_call` ハンドラが引数を書き換えた場合は検知しません
 
 ## 設定
 
@@ -121,7 +126,7 @@ pi は何も確認せずにツールを実行します。これは Claude Code �
 | `headerTitle` | ヘッダーの名前。`"Claude Code"` にもできる（バージョンは pi のもの） |
 | `header` / `spinner` / `turnDuration` / `prompt` / `tools` / `messages` | 各要素の置き換えを個別に止める |
 | `modeCycle` | shift+tab で権限モードを切り替える。`false` にすると shift+tab は pi の thinking レベル切り替えに戻る |
-| `permissionMode` | 起動時の権限モード（`default` / `acceptEdits` / `plan` / `bypassPermissions`） |
+| `permissionMode` | 起動時の権限モード（`default`（`manual` も可）/ `acceptEdits` / `plan` / `bypassPermissions`）。認識できない値は `default` になり、起動時に警告します |
 
 ## pi 内部への変更
 
@@ -145,7 +150,7 @@ pi は何も確認せずにツールを実行します。これは Claude Code �
 - トークン数は応答の文字数÷4（Claude Code と同じ近似）。数え上げのアニメーションはしない
 - compaction・再試行中の表示は pi のもの
 - ステータスラインは pi-cc-statusline、TODO は pi-claude-todo が担当する
-- サブエージェントの子（`PI_SUBAGENT_CHILD` / `PI_SUBAGENT_PARENT_SESSION`）では何もしない
+- 別プロセスとして起動されたサブエージェント（`PI_SUBAGENT_CHILD` / `PI_SUBAGENT_PARENT_SESSION` が付くもの）の中では何もしない。そのプロセスの bash / edit / write は確認されない
 
 ## 開発
 

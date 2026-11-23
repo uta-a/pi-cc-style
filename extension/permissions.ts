@@ -15,10 +15,11 @@
  * options with the `❯` pointer in `suggestion`.
  */
 import { existsSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { parseDiff, renderDiffRows } from "./diff.ts";
-import { FAST_FORWARD, PAUSE, POINTER } from "./format.ts";
+import { FAST_FORWARD, moreLines, PAUSE, POINTER, sanitize } from "./format.ts";
 import type { Palette } from "./palette.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
@@ -31,10 +32,14 @@ export const MODE_INFO: Record<PermissionMode, { title: string; indicator: strin
 	bypassPermissions: { title: "Bypass Permissions", indicator: "bypass permissions", symbol: FAST_FORWARD, color: "error" },
 };
 
-const CYCLE: PermissionMode[] = ["default", "acceptEdits", "plan", "bypassPermissions"];
-
-export function nextMode(mode: PermissionMode): PermissionMode {
-	return CYCLE[(CYCLE.indexOf(mode) + 1) % CYCLE.length]!;
+/**
+ * `Tr`: manual → accept edits → plan → bypass permissions → manual. Like Claude Code, bypass is in
+ * the cycle only when it is available: the session started in it or `/cc-mode` selected it.
+ */
+export function nextMode(mode: PermissionMode, bypassAvailable = true): PermissionMode {
+	const cycle: PermissionMode[] = bypassAvailable ? ["default", "acceptEdits", "plan", "bypassPermissions"] : ["default", "acceptEdits", "plan"];
+	const at = cycle.indexOf(mode);
+	return cycle[(at + 1) % cycle.length]!;
 }
 
 /** `eH`: the mode pill of the footer, lower-case title; faint, bypass in `error`. */
@@ -55,34 +60,108 @@ export function rejectReason(feedback?: string): string {
 	return `${REJECT_WITH_FEEDBACK}${feedback.trim()}`;
 }
 
-/** The first word of a command, which "don't ask again" allows for the session. */
-export function commandPrefix(command: string): string {
-	const first = command.trim().split(/\s+/)[0] ?? "";
-	return first.replace(/^['"]|['"]$/g, "");
+/**
+ * Whether a command chains, pipes, substitutes or redirects. Such a command is never covered by
+ * an allowed prefix: `git status && rm -rf x` would otherwise run under an allowed `git status`.
+ */
+export function isCompoundCommand(command: string): boolean {
+	return /[;&|`<>\n\r]|\$\(/.test(command.trim());
 }
 
 /**
- * Whether a command chains, pipes, substitutes or redirects. Such a command is never covered by
- * an allowed first word: `git status && rm -rf x` would otherwise run under an allowed `git`.
+ * Programs that run other programs or code given as arguments (`env rm`, `sh -c`, `node -e`,
+ * `find -exec`, `xargs`, ...). Allowing them by name would allow anything, so they always ask.
  */
-export function isCompoundCommand(command: string): boolean {
-	return /[;&|`<>\n]|\$\(/.test(command.trim());
+const RUNS_ANYTHING = new Set([
+	"env", "xargs", "parallel", "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "eval", "exec", "source", ".",
+	"sudo", "doas", "su", "nohup", "timeout", "command", "builtin", "nice", "ionice", "time", "watch", "script", "ssh",
+	"find", "awk", "gawk", "sed", "perl", "python", "python2", "python3", "ruby", "node", "nodejs", "php", "lua", "osascript",
+	"pwsh", "powershell", "Rscript", "tclsh", "expect", "open",
+]);
+
+/** Programs with subcommands; allowing one allows that subcommand only (`git status`, not `git push`). */
+const HAS_SUBCOMMANDS = new Set([
+	"git", "npm", "pnpm", "yarn", "bun", "deno", "npx", "bunx", "cargo", "go", "docker", "podman", "kubectl", "gh", "brew",
+	"pip", "pip3", "uv", "poetry", "make", "just", "dotnet", "swift", "gradle", "./gradlew", "mvn", "terraform", "rustup",
+]);
+
+const WORD = /^[A-Za-z0-9._+\/-]+$/;
+const SUBCOMMAND = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+function words(command: string): string[] {
+	return command.trim().split(/[ \t]+/).filter(Boolean);
+}
+
+/**
+ * The prefix "don't ask again" allows for a command, or undefined when the command cannot be
+ * allowed by a prefix: compound commands, leading `NAME=value` assignments, quoting or unusual
+ * characters in the program name, programs that run anything, and subcommand tools called with
+ * a flag first (`git -c core.fsmonitor=… status`).
+ */
+export function commandPrefix(command: string): string | undefined {
+	if (isCompoundCommand(command)) return undefined;
+	const [first, second] = words(command);
+	if (!first || !WORD.test(first) || RUNS_ANYTHING.has(basename(first))) return undefined;
+	if (!HAS_SUBCOMMANDS.has(first)) return first;
+	return second && SUBCOMMAND.test(second) ? `${first} ${second}` : undefined;
 }
 
 export interface PermissionState {
 	mode: PermissionMode;
-	/** Commands allowed for the session by their first word. */
+	/** Prefixes allowed for the session, as `<cwd>\0<prefix>`. */
 	allowedCommands: Set<string>;
+	/** Whether shift+tab may cycle into bypass permissions. */
+	bypassAvailable?: boolean;
 }
 
+export function allowCommand(state: PermissionState, command: string, cwd: string) {
+	const prefix = commandPrefix(command);
+	if (prefix) state.allowedCommands.add(`${cwd}\0${prefix}`);
+}
+
+/** Whether a command starts with a prefix allowed in this directory. */
+export function isAllowedCommand(state: PermissionState, command: string, cwd: string): boolean {
+	if (commandPrefix(command) === undefined) return false;
+	const tokens = words(command);
+	for (const rule of state.allowedCommands) {
+		const [ruleCwd, prefix] = rule.split("\0");
+		if (ruleCwd !== cwd || !prefix) continue;
+		if (prefix.split(" ").every((word, i) => tokens[i] === word)) return true;
+	}
+	return false;
+}
+
+/** pi's `resolveToCwd`: a leading `@` dropped, Unicode spaces made plain, `~` expanded. */
+export function resolveToolPath(path: string, cwd: string): string {
+	let p = path.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
+	if (p.startsWith("@")) p = p.slice(1);
+	if (p === "~") p = homedir();
+	else if (p.startsWith("~/")) p = homedir() + p.slice(1);
+	return isAbsolute(p) ? resolve(p) : resolve(cwd, p);
+}
+
+/** accept edits approves edits inside the working directory only, and never under `.git/`. */
+export function isInsideWorkspace(path: string, cwd: string): boolean {
+	const rel = relative(resolve(cwd), resolveToolPath(path, cwd));
+	if (!rel || rel.startsWith("..") || isAbsolute(rel)) return false;
+	return !rel.split(sep).includes(".git");
+}
+
+const SHELL_TOOLS = new Set(["bash", "powershell"]);
+
 /** Whether a call needs the prompt in the current mode. */
-export function needsPrompt(state: PermissionState, toolName: string, input: Record<string, unknown>): boolean {
+export function needsPrompt(state: PermissionState, toolName: string, input: Record<string, unknown>, cwd = process.cwd()): boolean {
 	if (state.mode === "bypassPermissions") return false;
 	if (toolName === "bash") {
 		const command = typeof input.command === "string" ? input.command : "";
-		return isCompoundCommand(command) || !state.allowedCommands.has(commandPrefix(command));
+		return !isAllowedCommand(state, command, cwd);
 	}
-	if (toolName === "edit" || toolName === "write") return state.mode !== "acceptEdits";
+	if (SHELL_TOOLS.has(toolName)) return true;
+	if (toolName === "edit" || toolName === "write") {
+		if (state.mode !== "acceptEdits") return true;
+		const path = typeof input.path === "string" ? input.path : typeof input.file_path === "string" ? input.file_path : "";
+		return !path || !isInsideWorkspace(path, cwd);
+	}
 	return false;
 }
 
@@ -90,6 +169,16 @@ export interface PermissionRequest {
 	toolName: string;
 	input: Record<string, unknown>;
 	cwd: string;
+	/** Another tool (a subagent, a codemode script) issued the call. */
+	nested?: boolean;
+}
+
+/** Rows of a command or diff shown in the prompt; the rest is counted. The start stays visible. */
+const MAX_BODY_ROWS = 40;
+
+function limitRows(p: Palette, rows: string[]): string[] {
+	if (rows.length <= MAX_BODY_ROWS) return rows;
+	return [...rows.slice(0, MAX_BODY_ROWS), `  ${p.dim(moreLines(rows.length - MAX_BODY_ROWS))}`];
 }
 
 export interface PermissionOption {
@@ -98,16 +187,17 @@ export interface PermissionOption {
 }
 
 export function describeRequest(p: Palette, req: PermissionRequest, width: number, highlight?: (code: string, path: string) => string) {
-	const path = typeof req.input.path === "string" ? req.input.path : typeof req.input.file_path === "string" ? req.input.file_path : "";
-	const abs = path ? (isAbsolute(path) ? path : resolve(req.cwd, path)) : "";
+	const rawPath = typeof req.input.path === "string" ? req.input.path : typeof req.input.file_path === "string" ? req.input.file_path : "";
+	const path = sanitize(rawPath).replace(/\n/g, " ");
+	const abs = rawPath ? resolveToolPath(rawPath, req.cwd) : "";
 	const shortPath = path;
-	if (req.toolName === "bash") {
-		const command = typeof req.input.command === "string" ? req.input.command : "";
-		const prefix = commandPrefix(command);
-		// A compound command cannot be allowed by its first word, so it only gets yes / no.
+	if (SHELL_TOOLS.has(req.toolName)) {
+		const command = sanitize(typeof req.input.command === "string" ? req.input.command : "");
+		const prefix = req.toolName === "bash" ? commandPrefix(command) : undefined;
+		// A command no prefix can cover (compound, wrappers, interpreters) only gets yes / no.
 		const options: PermissionOption[] = [
 			{ value: "yes", label: "Yes" },
-			...(isCompoundCommand(command)
+			...(prefix === undefined
 				? []
 				: [
 						{
@@ -117,9 +207,10 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 					]),
 			{ value: "no", label: `No, and tell Claude what to do differently ${p.bold("(esc)")}` },
 		];
-		const body = command.split("\n").flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width - 4)).map((l) => `  ${l}`));
-		const description = typeof req.input.description === "string" ? [`  ${p.dim(req.input.description)}`] : [];
-		return { title: "Bash command", body: [...body, ...description], question: "Do you want to proceed?", options };
+		const body = limitRows(p, command.split("\n").flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width - 4)).map((l) => `  ${l}`)));
+		const description = typeof req.input.description === "string" ? [`  ${p.dim(sanitize(req.input.description).replace(/\n/g, " "))}`] : [];
+		const title = req.toolName === "bash" ? "Bash command" : "PowerShell command";
+		return { title, body: [...body, ...description], question: "Do you want to proceed?", options };
 	}
 	const editOptions = (): PermissionOption[] => [
 		{ value: "yes", label: "Yes" },
@@ -132,7 +223,7 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 	];
 	if (req.toolName === "write") {
 		const exists = abs ? existsSync(abs) : false;
-		const content = typeof req.input.content === "string" ? req.input.content : "";
+		const content = sanitize(typeof req.input.content === "string" ? req.input.content : "");
 		const lines = content.replace(/\n$/, "").split("\n");
 		const shown = lines.slice(0, 20).map((line) => `  ${truncateToWidth(highlight ? highlight(line, path) : line, Math.max(1, width - 4), "…")}`);
 		if (lines.length > 20) shown.push(p.dim(`  … +${lines.length - 20} lines`));
@@ -149,14 +240,14 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 		: [{ oldText: req.input.oldText as string | undefined, newText: req.input.newText as string | undefined }];
 	const body: string[] = [`  ${p.dim(shortPath)}`];
 	for (const edit of edits) {
-		const before = (edit.oldText ?? "").split("\n");
-		const after = (edit.newText ?? "").split("\n");
+		const before = sanitize(edit.oldText ?? "").split("\n");
+		const after = sanitize(edit.newText ?? "").split("\n");
 		const diff = [...before.map((l, i) => `-${i + 1} ${l}`), ...after.map((l, i) => `+${i + 1} ${l}`)].join("\n");
 		body.push(...renderDiffRows(p, parseDiff(diff), Math.max(20, width - 4), { highlight: highlight ? (c) => highlight(c, path) : undefined }).map((l) => `  ${l}`));
 	}
 	return {
 		title: "Edit file",
-		body,
+		body: limitRows(p, body),
 		question: `Do you want to make this edit to ${p.bold(shortPath.split("/").pop() ?? shortPath)}?`,
 		options: editOptions(),
 	};
@@ -175,6 +266,7 @@ export function renderPermissionPrompt(
 	const out: string[] = [""];
 	out.push(p.fg("permission", "─".repeat(Math.max(0, width))));
 	out.push(` ${p.style(d.title, { bold: true, color: "permission" })}`);
+	if (req.nested) out.push(` ${p.dim("Requested by a subagent or another tool")}`);
 	out.push("");
 	for (const line of d.body) out.push(truncateToWidth(` ${line}`, width, ""));
 	out.push("");
