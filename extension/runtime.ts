@@ -2,7 +2,7 @@
  * State shared by the prototype patches, which run outside any extension context: the current
  * UI (for its theme), the extension settings, and whether tool output is expanded.
  */
-import { Palette, type ThemeInfo } from "./palette.ts";
+import { Palette, type ThemeInfo, themeIdFor } from "./palette.ts";
 
 export interface StyleSettings {
 	/** Product name in the startup header. */
@@ -68,41 +68,65 @@ interface UiLike {
 	readonly theme: ThemeInfo;
 }
 
-let ui: UiLike | undefined;
-let settings: StyleSettings = { ...DEFAULT_SETTINGS };
-let toolsExpanded = false;
-let cachedPalette: { theme: ThemeInfo | undefined; palette: Palette } | undefined;
+/**
+ * The state lives on globalThis: `/reload` loads a fresh copy of this module, but the prototype
+ * patches installed by the first copy stay, and they must see the settings and theme the new copy
+ * sets.
+ */
+interface RuntimeState {
+	ui: UiLike | undefined;
+	settings: StyleSettings;
+	toolsExpanded: boolean;
+	palettes: Map<string, Palette>;
+}
+
+const STATE = Symbol.for("pi-cc-style.runtime");
+const globalState = globalThis as { [STATE]?: RuntimeState };
+const state: RuntimeState = (globalState[STATE] ??= {
+	ui: undefined,
+	settings: { ...DEFAULT_SETTINGS },
+	toolsExpanded: false,
+	palettes: new Map(),
+});
 
 export function setUi(next: UiLike | undefined) {
-	ui = next;
+	state.ui = next;
 }
 
 export function setSettings(next: StyleSettings) {
-	settings = next;
+	state.settings = next;
 }
 
 export function getSettings(): StyleSettings {
-	return settings;
+	return state.settings;
 }
 
 export function setToolsExpanded(expanded: boolean) {
-	toolsExpanded = expanded;
+	state.toolsExpanded = expanded;
 }
 
 export function isToolsExpanded(): boolean {
-	return toolsExpanded;
+	return state.toolsExpanded;
 }
 
-/** The Claude Code palette for the active pi theme. */
+/**
+ * The Claude Code palette for the active pi theme. pi's theme object keeps its identity when the
+ * theme changes, so the palette is keyed by the variant and colour mode it resolves to.
+ */
 export function palette(): Palette {
 	let theme: ThemeInfo | undefined;
+	let mode = "truecolor";
 	try {
-		theme = ui?.theme;
+		theme = state.ui?.theme;
+		mode = theme?.getColorMode?.() ?? "truecolor";
 	} catch {
 		theme = undefined;
 	}
-	if (cachedPalette && cachedPalette.theme === theme) return cachedPalette.palette;
-	const next = Palette.for(theme);
-	cachedPalette = { theme, palette: next };
-	return next;
+	const key = `${themeIdFor(theme)}|${mode}`;
+	let cached = state.palettes.get(key);
+	if (!cached) {
+		cached = Palette.for(theme);
+		state.palettes.set(key, cached);
+	}
+	return cached;
 }

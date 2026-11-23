@@ -262,6 +262,29 @@ export function updateAssistantContent(
 	}
 }
 
+const MESSAGES_IMPL = Symbol.for("pi-cc-style.messages.impl");
+const EXTRAS_IMPL = Symbol.for("pi-cc-style.extras.impl");
+
+interface MessagesImpl {
+	getPalette: () => Palette;
+	enabled: () => boolean;
+	update: typeof updateAssistantContent;
+	user: typeof renderUserPrompt;
+}
+
+interface ExtrasImpl {
+	getPalette: () => Palette;
+	enabled: () => boolean;
+	output: (text: string, tone: "plain" | "error", width: number, expanded: boolean) => string[];
+	expandKey: () => string;
+	bash: typeof renderBashRun;
+	compaction: typeof renderCompaction;
+}
+
+function registry(): Record<symbol, unknown> {
+	return globalThis as unknown as Record<symbol, unknown>;
+}
+
 interface PatchTargets {
 	AssistantMessageComponent: { prototype: Record<string | symbol, unknown> };
 	UserMessageComponent: { prototype: Record<string | symbol, unknown> };
@@ -274,19 +297,24 @@ interface PatchTargets {
 export function patchMessages(targets: PatchTargets, getPalette: () => Palette, enabled: () => boolean) {
 	const assistant = targets.AssistantMessageComponent.prototype;
 	const user = targets.UserMessageComponent.prototype;
+	// The patch stays across `/reload`; it calls whatever the latest copy of this module registered.
+	registry()[MESSAGES_IMPL] = { getPalette, enabled, update: updateAssistantContent, user: renderUserPrompt };
 	if (assistant[PATCHED]) return;
 	assistant[PATCHED] = true;
+	const impl = () => registry()[MESSAGES_IMPL] as MessagesImpl;
 
 	const originalUpdate = assistant.updateContent as (this: unknown, message: unknown, isStreaming?: boolean) => void;
 	assistant.updateContent = function (this: AssistantLike, message: AssistantMessageLike, isStreaming = this.isStreaming) {
-		if (!enabled()) return originalUpdate.call(this, message, isStreaming);
-		return updateAssistantContent.call(this, message, isStreaming, getPalette);
+		const current = impl();
+		if (!current.enabled()) return originalUpdate.call(this, message, isStreaming);
+		return current.update.call(this, message, isStreaming, current.getPalette);
 	};
 
 	const originalRender = user.render as (this: unknown, width: number) => string[];
 	user.render = function (this: { text: string }, width: number) {
-		if (!enabled()) return originalRender.call(this, width);
-		const lines = renderUserPrompt(getPalette(), this.text ?? "", width);
+		const current = impl();
+		if (!current.enabled()) return originalRender.call(this, width);
+		const lines = current.user(current.getPalette(), this.text ?? "", width);
 		if (lines.length === 0) return lines;
 		lines[0] = OSC133_ZONE_START + lines[0];
 		lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
@@ -360,25 +388,29 @@ export function patchExtras(
 ) {
 	const bash = targets.BashExecutionComponent.prototype;
 	const compaction = targets.CompactionSummaryMessageComponent.prototype;
+	registry()[EXTRAS_IMPL] = { getPalette, enabled, output, expandKey, bash: renderBashRun, compaction: renderCompaction };
 	if (bash[EXTRAS_PATCHED]) return;
 	bash[EXTRAS_PATCHED] = true;
+	const impl = () => registry()[EXTRAS_IMPL] as ExtrasImpl;
 	const bashRender = bash.render as (this: unknown, width: number) => string[];
 	// The output only grows while the command runs, so its length and last line identify it.
 	const cache = new WeakMap<object, { key: string; palette: Palette; lines: string[] }>();
 	bash.render = function (this: BashRunLike, width: number) {
-		if (!enabled()) return bashRender.call(this, width);
-		const p = getPalette();
+		const current = impl();
+		if (!current.enabled()) return bashRender.call(this, width);
+		const p = current.getPalette();
 		const lines = this.outputLines ?? [];
 		const key = [width, this.expanded, this.status, this.exitCode, this.command, lines.length, lines[lines.length - 1]].join("\0");
 		const hit = cache.get(this);
 		if (hit && hit.key === key && hit.palette === p) return hit.lines;
-		const rendered = renderBashRun(p, this, width, (text, tone) => output(text, tone, width, this.expanded));
+		const rendered = current.bash(p, this, width, (text, tone) => current.output(text, tone, width, this.expanded));
 		cache.set(this, { key, palette: p, lines: rendered });
 		return rendered;
 	};
 	const compactionRender = compaction.render as (this: unknown, width: number) => string[];
 	compaction.render = function (this: { message: { summary: string }; expanded: boolean }, width: number) {
-		if (!enabled()) return compactionRender.call(this, width);
-		return renderCompaction(getPalette(), this.message?.summary ?? "", this.expanded, expandKey(), width);
+		const current = impl();
+		if (!current.enabled()) return compactionRender.call(this, width);
+		return current.compaction(current.getPalette(), this.message?.summary ?? "", this.expanded, current.expandKey(), width);
 	};
 }

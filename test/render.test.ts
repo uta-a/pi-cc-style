@@ -8,7 +8,7 @@ import { renderClawd, renderHeader, truncateStart } from "../extension/header.ts
 import { Gutter, renderApiError, renderBashRun, renderCompaction, renderInterrupted, renderThinking, renderUserPrompt, updateAssistantContent } from "../extension/messages.ts";
 import { Palette, rgbTo256, themeIdFor } from "../extension/palette.ts";
 import { allowCommand, commandPrefix, isCompoundCommand, modePill, needsPrompt, nextMode, rejectReason, renderPermissionPrompt, resolveToolPath } from "../extension/permissions.ts";
-import { readSettings, settingsProblems } from "../extension/runtime.ts";
+import { palette, readSettings, settingsProblems, setUi } from "../extension/runtime.ts";
 import { renderSpinner, SpinnerState, thinkingLabel } from "../extension/spinner.ts";
 import { buildTheme } from "../extension/themes.ts";
 import { BUILTIN_VIEWS, CallRow, callRow, displayPath, fullOutput, genericArgs, hardWrap, ResultRows, truncatedOutput } from "../extension/tools.ts";
@@ -396,4 +396,13 @@ test("narrow and wide rows stay within the width", () => {
 	for (const width of [8, 9, 13, 81]) assert.ok(rows.render(width).every((line) => visibleWidth(line) <= width), `result ${width}`);
 	assert.ok(renderCompaction(p, "summary ".repeat(10), true, "ctrl+o", 6).every((line) => visibleWidth(line) <= 6));
 	assert.ok(callRow(p, { executionStarted: true, isPartial: false, isError: false, hasResult: true, expanded: true }, "Bash", "あ".repeat(80), 81).every((line) => visibleWidth(line) <= 81));
+});
+
+test("the palette follows a theme change on the same theme object", () => {
+	const theme = { name: "claude-code-light", getColorMode: () => "truecolor" as const };
+	setUi({ theme });
+	assert.equal(palette().id, "light");
+	theme.name = "claude-code-dark";
+	assert.equal(palette().id, "dark");
+	setUi(undefined);
 });
