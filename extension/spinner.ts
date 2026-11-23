@@ -13,7 +13,7 @@
  *   waiting, ↓ while streaming) and the thinking state, each only when it fits.
  */
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { ARROW_DOWN, ARROW_UP, ELLIPSIS, SPINNER_VERBS, formatDuration, formatNumber, spinnerFrames } from "./format.ts";
+import { ARROW_DOWN, ARROW_UP, clampLines, ELLIPSIS, SPINNER_VERBS, formatDuration, formatNumber, spinnerFrames } from "./format.ts";
 import { cosineEase, mixRGB, type Palette, quantize, type RGB } from "./palette.ts";
 
 export type SpinnerMode = "requesting" | "responding" | "thinking" | "tool-use";
@@ -244,5 +244,5 @@ export function renderSpinner(p: Palette, state: SpinnerState, options: SpinnerR
 		suffix = thinkingOnly ? items.join(p.dim(sep)) : `${p.dim("(")}${items.join(p.dim(sep))}${p.dim(")")}`;
 	}
 	const line = `${glyph} ${text} ${suffix}`.trimEnd();
-	return ["", line];
+	return ["", ...clampLines([line], width)];
 }

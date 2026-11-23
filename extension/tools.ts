@@ -13,10 +13,10 @@
  * renderers; other tools without a renderer get the generic row.
  */
 import { isAbsolute, relative } from "node:path";
-import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { countChanges, parseDiff, renderDiffRows } from "./diff.ts";
 import { renderGroupRow, type ToolGroups } from "./grouping.ts";
-import { DOT, ELLIPSIS, moreLines, plural, tildify } from "./format.ts";
+import { clampLines, DOT, ELLIPSIS, moreLines, plural, sanitize, tildify } from "./format.ts";
 import { type Component, resultRows } from "./messages.ts";
 import type { Palette } from "./palette.ts";
 
@@ -41,9 +41,10 @@ export function callRow(p: Palette, state: ToolCallState, name: string, args: st
 	const room = width - visibleWidth(head) - 2;
 	if (state.expanded) {
 		// Verbose mode keeps the whole argument text and wraps it.
-		return wrapPlain(`${name}(${args})`, width - 2).map((line, i) =>
+		const rows = wrapPlain(`${name}(${args})`, Math.max(1, width - 2)).map((line, i) =>
 			i === 0 ? `${toolDot(p, state, now)} ${p.bold(line.slice(0, name.length))}${line.slice(name.length)}` : `  ${line}`,
 		);
+		return clampLines(rows, width);
 	}
 	const inner = room > 1 ? truncateToWidth(args, room, ELLIPSIS) : "";
 	return [truncateToWidth(`${head}(${inner})`, width, "")];
@@ -53,13 +54,60 @@ function wrapPlain(text: string, width: number): string[] {
 	return text.split("\n").flatMap((line) => hardWrap(line, width));
 }
 
-/** Cuts a line every `width` columns, keeping ANSI styles intact. */
+const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+/** CSI (SGR and others), OSC and APC sequences, terminated by BEL or ST. */
+const ANSI = /\x1b(?:\[[0-?]*[ -/]*[@-~]|[\]_][^\x07\x1b]*(?:\x07|\x1b\\))/y;
+
+function extractAnsiCode(line: string, at: number): { code: string; length: number } | undefined {
+	ANSI.lastIndex = at;
+	const m = ANSI.exec(line);
+	return m ? { code: m[0], length: m[0].length } : undefined;
+}
+
+/**
+ * Cuts a line into pieces of at most `width` columns in one pass, keeping ANSI styles: a wide
+ * character that would straddle the edge starts the next piece, and each piece reopens the styles
+ * active where it starts.
+ */
 export function hardWrap(line: string, width: number): string[] {
-	const total = visibleWidth(line);
-	if (width <= 0 || total <= width) return [line];
+	if (width <= 0 || visibleWidth(line) <= width) return [line];
 	const out: string[] = [];
-	for (let col = 0; col < total; col += width) out.push(sliceByColumn(line, col, width));
+	let piece = "";
+	let used = 0;
+	let active = "";
+	let i = 0;
+	while (i < line.length) {
+		if (line[i] === "\x1b") {
+			const ansi = extractAnsiCode(line, i);
+			if (ansi) {
+				piece += ansi.code;
+				if (/^\x1b\[[0-9;:]*m$/.test(ansi.code)) active = /^\x1b\[0?m$/.test(ansi.code) ? "" : active + ansi.code;
+				i += ansi.length;
+				continue;
+			}
+		}
+		let end = line.indexOf("\x1b", i + 1);
+		if (end < 0) end = line.length;
+		for (const { segment } of segmenter.segment(line.slice(i, end))) {
+			const w = visibleWidth(segment);
+			if (used > 0 && used + w > width) {
+				out.push(active ? `${piece}\x1b[0m` : piece);
+				piece = active;
+				used = 0;
+			}
+			piece += segment;
+			used += w;
+		}
+		i = end;
+	}
+	out.push(piece);
 	return out;
+}
+
+/** How many rows `hardWrap` makes of a line, without building them. */
+function wrappedRows(line: string, width: number): number {
+	const w = visibleWidth(line);
+	return w <= width ? 1 : Math.ceil(w / width);
 }
 
 /** `Po`: paths below the working directory are shown relative to it, others with ~. */
@@ -88,8 +136,17 @@ export function truncatedOutput(p: Palette, text: string, columns: number, expan
 	const trimmed = text.replace(/\s+$/, "");
 	if (!trimmed) return [];
 	const width = Math.max(columns - 10, 10);
-	const wrapped = trimmed.split("\n").flatMap((raw) => hardWrap(raw.replace(/\t/g, "    "), width).map((l) => l.trimEnd()));
-	const hidden = wrapped.length - 3;
+	// Only the first rows are built; the rest are counted, so a huge output stays cheap.
+	const wrapped: string[] = [];
+	let total = 0;
+	for (const line of trimmed.split("\n")) {
+		if (wrapped.length < 4) {
+			const rows = hardWrap(line.replace(/\t/g, "    "), width).map((l) => l.trimEnd());
+			wrapped.push(...rows);
+			total += rows.length;
+		} else total += wrappedRows(line, width);
+	}
+	const hidden = total - 3;
 	const shown = hidden === 1 ? wrapped.slice(0, 4) : wrapped.slice(0, 3);
 	const color = (line: string) => (tone === "error" ? p.fg("error", line) : line);
 	const lines = shown.map(color);
@@ -98,10 +155,12 @@ export function truncatedOutput(p: Palette, text: string, columns: number, expan
 }
 
 /** Full output for verbose mode. */
-export function fullOutput(p: Palette, text: string, tone: "plain" | "error" = "plain"): string[] {
+export function fullOutput(p: Palette, text: string, tone: "plain" | "error" = "plain", width?: number): string[] {
 	const trimmed = text.replace(/\s+$/, "");
 	if (!trimmed) return [];
-	return trimmed.split("\n").map((line) => (tone === "error" ? p.fg("error", line) : line));
+	const lines = trimmed.split("\n");
+	const wrapped = width === undefined ? lines : lines.flatMap((line) => hardWrap(line, Math.max(1, width)));
+	return wrapped.map((line) => (tone === "error" ? p.fg("error", line) : line));
 }
 
 /** Wraps result lines to the room right of the elbow. */
@@ -118,7 +177,7 @@ export interface ToolResultLike {
 export function resultText(result: ToolResultLike | undefined): string {
 	return (result?.content ?? [])
 		.filter((c) => c.type === "text" && typeof c.text === "string")
-		.map((c) => c.text)
+		.map((c) => sanitize(c.text!))
 		.join("\n");
 }
 
@@ -207,7 +266,7 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 			if (ctx.isError) return errorRows(p, resultText(result), ctx);
 			const details = result.details as { diff?: string } | undefined;
 			if (!details?.diff) return [p.dim(stripNotices(resultText(result)) || "Updated")];
-			const items = parseDiff(details.diff);
+			const items = parseDiff(sanitize(details.diff));
 			const { added, removed } = countChanges(items);
 			const parts: string[] = [];
 			if (added > 0) parts.push(`Added ${b(p, added)} ${added > 1 ? "lines" : "line"}`);
@@ -226,7 +285,7 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 		},
 		result(p, args, result, ctx) {
 			if (ctx.isError) return errorRows(p, resultText(result), ctx);
-			const content = str(args.content);
+			const content = sanitize(str(args.content));
 			const n = countLines(content);
 			const path = displayPath(str(args.path ?? args.file_path), ctx.cwd);
 			const out = [`Wrote ${b(p, n)} ${plural(n, "line")} to ${b(p, path)}`];
@@ -241,7 +300,7 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 	grep: {
 		name: "Search",
 		args(args, ctx) {
-			const parts = [`pattern: "${str(args.pattern)}"`];
+			const parts = [`pattern: "${str(args.pattern).replace(/\n/g, "\\n")}"`];
 			if (args.path) parts.push(`path: "${displayPath(str(args.path), ctx.cwd)}"`);
 			if (args.glob) parts.push(`glob: "${str(args.glob)}"`);
 			return parts.join(", ");
@@ -259,7 +318,7 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 	find: {
 		name: "Search",
 		args(args, ctx) {
-			const parts = [`pattern: "${str(args.pattern)}"`];
+			const parts = [`pattern: "${str(args.pattern).replace(/\n/g, "\\n")}"`];
 			if (args.path) parts.push(`path: "${displayPath(str(args.path), ctx.cwd)}"`);
 			return parts.join(", ");
 		},
@@ -334,7 +393,7 @@ export class CallRow implements Component {
 				return [truncateToWidth(renderGroupRow(this.palette(), this.grouping.groups, ids, this.grouping.expandKey()), width, "")];
 			}
 		}
-		const args = this.view.args(this.args ?? {}, { cwd: this.cwd, expanded: this.state.expanded });
+		const args = sanitize(this.view.args(this.args ?? {}, { cwd: this.cwd, expanded: this.state.expanded }));
 		return callRow(this.palette(), this.state, this.view.name, args, width);
 	}
 	invalidate() {}
@@ -357,7 +416,7 @@ export class ResultRows implements Component {
 		const c = this.cache;
 		if (c && c.width === width && c.draw === this.draw && c.palette === p) return c.lines;
 		const fitted = fit(this.draw(width), width);
-		const lines = fitted.length > 0 ? resultRows(fitted, p) : [];
+		const lines = fitted.length > 0 ? clampLines(resultRows(fitted, p), width) : [];
 		this.cache = { width, draw: this.draw, palette: p, lines };
 		return lines;
 	}

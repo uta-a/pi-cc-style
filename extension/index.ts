@@ -107,7 +107,8 @@ export default function piCcStyle(pi: ExtensionAPI) {
 		{ BashExecutionComponent, CompactionSummaryMessageComponent } as never,
 		palette,
 		() => getSettings().messages,
-		(text, tone, width, expanded) => (expanded ? fullOutput(palette(), text, tone) : truncatedOutput(palette(), text, width, expandKey(), tone)),
+		(text, tone, width, expanded) =>
+			expanded ? fullOutput(palette(), text, tone, width - 5) : truncatedOutput(palette(), text, width, expandKey(), tone),
 		expandKey,
 	);
 
@@ -267,7 +268,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 				"cc-style-hints",
 				(widgetTui) => {
 					tui = widgetTui;
-					return new Lines(() => (prompting > 0 ? [] : [renderPromptFooter(palette(), permissions.mode, turnStartedAt !== undefined)]));
+					return new Lines((width) => (prompting > 0 ? [] : [renderPromptFooter(palette(), permissions.mode, turnStartedAt !== undefined, width)]));
 				},
 				{ placement: "belowEditor" },
 			);

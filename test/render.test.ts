@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { countChanges, pairRows, parseDiff, renderDiffRows, tokenize, wordRanges } from "../extension/diff.ts";
 import { decorateEditor } from "../extension/editor.ts";
-import { formatDuration, formatNumber, formatTokens, moreLines, stringHash, turnVerb } from "../extension/format.ts";
+import { formatDuration, formatNumber, formatTokens, moreLines, sanitize, stringHash, turnVerb } from "../extension/format.ts";
 import { renderClawd, renderHeader, truncateStart } from "../extension/header.ts";
 import { Gutter, renderApiError, renderBashRun, renderCompaction, renderInterrupted, renderThinking, renderUserPrompt, updateAssistantContent } from "../extension/messages.ts";
 import { Palette, rgbTo256, themeIdFor } from "../extension/palette.ts";
@@ -11,7 +11,7 @@ import { commandPrefix, isCompoundCommand, modePill, needsPrompt, nextMode, reje
 import { readSettings } from "../extension/runtime.ts";
 import { renderSpinner, SpinnerState, thinkingLabel } from "../extension/spinner.ts";
 import { buildTheme } from "../extension/themes.ts";
-import { BUILTIN_VIEWS, callRow, displayPath, genericArgs, hardWrap, truncatedOutput } from "../extension/tools.ts";
+import { BUILTIN_VIEWS, CallRow, callRow, displayPath, fullOutput, genericArgs, hardWrap, ResultRows, truncatedOutput } from "../extension/tools.ts";
 import { renderPromptFooter, renderTurnSummary } from "../extension/turn.ts";
 
 const p = new Palette("dark", "truecolor");
@@ -321,4 +321,38 @@ test("reads and searches in a row collapse into one row", async () => {
 	assert.equal(stripTerminalSequences(renderGroupRow(p, groups, ["a", "b"], "ctrl+o")).slice(2), "Searched for 1 pattern, read 1 file (ctrl+o to expand)");
 	groups.update({ role: "assistant", timestamp: 2, content: [{ type: "text", text: "x" }, { type: "toolCall", id: "e", name: "find" }] });
 	assert.equal(groups.group("e"), undefined);
+});
+
+test("hard wrap never exceeds the width, keeps styles and stays linear", () => {
+	const wide = `a${"あ".repeat(40)}`;
+	const pieces = hardWrap(wide, 76);
+	assert.ok(pieces.every((piece) => visibleWidth(piece) <= 76));
+	assert.equal(pieces.join(""), wide);
+	const styled = hardWrap(`\x1b[31m${"x".repeat(10)}\x1b[0m`, 4);
+	assert.equal(styled.length, 3);
+	assert.ok(styled[1]!.startsWith("\x1b[31m"));
+	assert.deepEqual(styled.map((piece) => stripTerminalSequences(piece)), ["xxxx", "xxxx", "xx"]);
+	const started = Date.now();
+	hardWrap("y".repeat(200_000), 70);
+	assert.ok(Date.now() - started < 1500);
+});
+
+test("tool text is sanitized like pi's own renderers", () => {
+	assert.equal(sanitize("a\x1b]52;c;ZXZpbA==\x07b\x1b[2Jc\rd\te\x00f\ng"), "abcd    ef\ng");
+	const out = BUILTIN_VIEWS.bash!.result!(p, {}, { content: [{ type: "text", text: "ok\x1b]0;pwned\x07\x1b[?1049l\nprogress\r100%" }] }, { cwd: "/", expanded: true, isError: false, isPartial: false, expandKey: "ctrl+o" }, 80);
+	assert.deepEqual(out, ["ok", "progress100%"]);
+	const row = new CallRow(BUILTIN_VIEWS.bash!, "/", () => p);
+	row.args = { command: "rm -rf ~ # \x1b[1K\x1b[1G  git status" };
+	assert.ok(!row.render(80).join("").includes("\x1b[1K"));
+});
+
+test("narrow and wide rows stay within the width", () => {
+	const run = { command: "printf", outputLines: ["a".repeat(200), "あ".repeat(60)], status: "complete" as const, expanded: true };
+	const lines = renderBashRun(p, run, 40, (text, tone) => fullOutput(p, text, tone, 35));
+	assert.ok(lines.every((line) => visibleWidth(line) <= 40), "! output");
+	const rows = new ResultRows(() => p);
+	rows.draw = () => ["あ".repeat(50)];
+	for (const width of [8, 9, 13, 81]) assert.ok(rows.render(width).every((line) => visibleWidth(line) <= width), `result ${width}`);
+	assert.ok(renderCompaction(p, "summary ".repeat(10), true, "ctrl+o", 6).every((line) => visibleWidth(line) <= 6));
+	assert.ok(callRow(p, { executionStarted: true, isPartial: false, isError: false, hasResult: true, expanded: true }, "Bash", "あ".repeat(80), 81).every((line) => visibleWidth(line) <= 81));
 });

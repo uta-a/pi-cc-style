@@ -3,6 +3,8 @@
  * Each function names the minified function of the reference build it follows.
  */
 
+import { stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+
 /** `Fc`: the message dot. macOS draws ⏺, other platforms ●. */
 export const DOT = process.platform === "darwin" ? "⏺" : "●";
 /** `SD`: the turn-summary and retry glyph. */
@@ -171,4 +173,27 @@ export const PROMPT_EXAMPLES = [
 export function tildify(path: string, home = process.env.HOME ?? ""): string {
 	if (home && (path === home || path.startsWith(`${home}/`))) return `~${path.slice(home.length)}`;
 	return path;
+}
+
+/** CSI (any, private modes included), OSC / DCS / APC / PM / SOS up to BEL or ST, and 2-byte ESC sequences. */
+const TERMINAL_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|[\]P_^X][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-Z\\-_])/g;
+
+/**
+ * Text from tools, files or the model as pi's own renderers show it (`getTextOutput`): terminal
+ * sequences (SGR, OSC, APC) removed, then control characters other than the newline, then carriage
+ * returns; tabs become spaces. Without this a tool result could set the clipboard (OSC 52), retitle
+ * the terminal, leave the alternate screen or overwrite rows of the transcript.
+ */
+export function sanitize(text: string): string {
+	return stripTerminalSequences(text)
+		.replace(TERMINAL_SEQUENCE, "")
+		.replace(/\r/g, "")
+		.replace(/\t/g, "    ")
+		.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F￹-￻]/g, "");
+}
+
+/** Cuts every line to the width; pi-tui throws on wider lines in its regular screen mode. */
+export function clampLines(lines: string[], width: number): string[] {
+	const w = Math.max(1, width);
+	return lines.map((line) => (visibleWidth(line) > w ? truncateToWidth(line, w, "") : line));
 }

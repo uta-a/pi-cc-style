@@ -10,7 +10,7 @@
  * - API error (`Xg`): `⏺` and the message in `warning`.
  */
 import { Markdown, type MarkdownTheme, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { DOT, ELLIPSIS, POINTER, RESULT_INDENT, RESULT_PREFIX, THEREFORE } from "./format.ts";
+import { clampLines, DOT, ELLIPSIS, POINTER, RESULT_INDENT, RESULT_PREFIX, sanitize, THEREFORE } from "./format.ts";
 import type { Palette } from "./palette.ts";
 
 export interface Component {
@@ -31,7 +31,10 @@ export class Gutter implements Component {
 	render(width: number): string[] {
 		const gutter = visibleWidth(this.rest);
 		const lines = this.child.render(Math.max(1, width - gutter));
-		return lines.map((line, i) => (i === 0 ? this.first : this.rest) + line);
+		return clampLines(
+			lines.map((line, i) => (i === 0 ? this.first : this.rest) + line),
+			width,
+		);
 	}
 	invalidate() {
 		this.child.invalidate();
@@ -95,7 +98,10 @@ export function renderUserPrompt(p: Palette, text: string, width: number): strin
 export function renderThinking(p: Palette, thinking: string, width: number): string[] {
 	const text = thinking.replace(/\s+/g, " ").trim();
 	const lines = wrapTextWithAnsi(text, Math.max(1, width - 2));
-	return lines.map((line, i) => `${i === 0 ? p.dim(THEREFORE) + " " : "  "}${p.style(line, { dim: true, italic: true })}`);
+	return clampLines(
+		lines.map((line, i) => `${i === 0 ? p.dim(THEREFORE) + " " : "  "}${p.style(line, { dim: true, italic: true })}`),
+		width,
+	);
 }
 
 /** `YS`: the interrupt line. */
@@ -105,8 +111,11 @@ export function renderInterrupted(p: Palette, width: number): string[] {
 
 /** `Xg`: an API error, `⏺` and text in `warning`. */
 export function renderApiError(p: Palette, message: string, width: number): string[] {
-	const lines = wrapTextWithAnsi(message, Math.max(1, width - 2));
-	return lines.map((line, i) => `${i === 0 ? `${p.fg("warning", DOT)} ` : "  "}${p.fg("warning", line)}`);
+	const lines = wrapTextWithAnsi(sanitize(message), Math.max(1, width - 2));
+	return clampLines(
+		lines.map((line, i) => `${i === 0 ? `${p.fg("warning", DOT)} ` : "  "}${p.fg("warning", line)}`),
+		width,
+	);
 }
 
 /** Continuation rows of a tool result: `  ⎿  ` before the first line, five spaces before the rest. */
@@ -321,7 +330,7 @@ export function renderBashRun(
 		rows = output(text, run.status === "error" ? "error" : "plain");
 		if (rows.length === 0) rows = [p.dim(run.status === "error" ? `Exit code ${run.exitCode}` : "(No output)")];
 	}
-	return ["", ...input, ...resultRows(rows, p)];
+	return ["", ...clampLines([...input, ...resultRows(rows, p)], width)];
 }
 
 /** `⏺ Compact summary (ctrl+o to expand)`, the summary under the elbow when expanded. */
@@ -332,7 +341,7 @@ export function renderCompaction(p: Palette, summary: string, expanded: boolean,
 		.split("\n")
 		.flatMap((line) => (line ? wrapTextWithAnsi(line, Math.max(1, width - 5)) : [""]))
 		.map((line) => p.dim(line));
-	return [head, ...resultRows(body, p)];
+	return clampLines([head, ...resultRows(body, p)], width);
 }
 
 interface ExtraTargets {
@@ -354,9 +363,18 @@ export function patchExtras(
 	if (bash[EXTRAS_PATCHED]) return;
 	bash[EXTRAS_PATCHED] = true;
 	const bashRender = bash.render as (this: unknown, width: number) => string[];
+	// The output only grows while the command runs, so its length and last line identify it.
+	const cache = new WeakMap<object, { key: string; palette: Palette; lines: string[] }>();
 	bash.render = function (this: BashRunLike, width: number) {
 		if (!enabled()) return bashRender.call(this, width);
-		return renderBashRun(getPalette(), this, width, (text, tone) => output(text, tone, width, this.expanded));
+		const p = getPalette();
+		const lines = this.outputLines ?? [];
+		const key = [width, this.expanded, this.status, this.exitCode, this.command, lines.length, lines[lines.length - 1]].join("\0");
+		const hit = cache.get(this);
+		if (hit && hit.key === key && hit.palette === p) return hit.lines;
+		const rendered = renderBashRun(p, this, width, (text, tone) => output(text, tone, width, this.expanded));
+		cache.set(this, { key, palette: p, lines: rendered });
+		return rendered;
 	};
 	const compactionRender = compaction.render as (this: unknown, width: number) => string[];
 	compaction.render = function (this: { message: { summary: string }; expanded: boolean }, width: number) {
