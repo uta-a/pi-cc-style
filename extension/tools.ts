@@ -202,9 +202,10 @@ export interface ResultContext {
 	highlight?: (code: string, path: string) => string;
 }
 
-/** `Cb`: an error result, in `error`, up to ten lines in normal mode. */
+/** `Cb`: an error result, in `error`, up to ten lines in normal mode, always starting with "Error: ". */
 function errorRows(p: Palette, text: string, ctx: ResultContext): string[] {
-	const body = text.trim() || "Error";
+	const trimmed = text.trim();
+	const body = !trimmed ? "Error" : /^(Error|Cancelled): /.test(trimmed) ? trimmed : `Error: ${trimmed}`;
 	const lines = body.split("\n");
 	const shown = ctx.expanded ? lines : lines.slice(0, 10);
 	const out = shown.map((line) => p.fg("error", line));
@@ -292,8 +293,13 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 			const lines = content.replace(/\n$/, "").split("\n");
 			const shown = ctx.expanded ? lines : lines.slice(0, 10);
 			const rawPath = str(args.path ?? args.file_path);
-			for (const line of shown) out.push(ctx.highlight ? ctx.highlight(line, rawPath) : line);
-			if (!ctx.expanded && lines.length > 10) out.push(p.dim(moreLines(lines.length - 10)));
+			// `Hv`: the code view with a faint line-number gutter.
+			const digits = String(shown.length).length;
+			shown.forEach((line, i) => {
+				const code = ctx.highlight ? ctx.highlight(line, rawPath) : line;
+				out.push(`${p.dim(` ${String(i + 1).padStart(digits)} `)}${code}`);
+			});
+			if (!ctx.expanded && lines.length > 10) out.push(p.dim(`${moreLines(lines.length - 10)} (${ctx.expandKey} to expand)`));
 			return out;
 		},
 	},

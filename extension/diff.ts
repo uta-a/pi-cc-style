@@ -272,7 +272,8 @@ export function renderDiffRows(p: Palette, items: DiffItem[], width: number, opt
 	const digits = String(rows.reduce((max, r) => Math.max(max, r.lineNumber), 0)).length;
 	const codeWidth = Math.max(1, width - digits - 2 - 1);
 	const ranges = new Map<DiffRow, Range[]>();
-	for (const [a, b] of pairRows(rows)) {
+	// Faint diffs skip the word emphasis (`if(!t){…We…}`).
+	for (const [a, b] of options.dim ? [] : pairRows(rows)) {
 		const [removed, added] = wordRanges(rows[a]!.code, rows[b]!.code);
 		ranges.set(rows[a]!, removed);
 		ranges.set(rows[b]!, added);
@@ -291,7 +292,8 @@ export function renderDiffRows(p: Palette, items: DiffItem[], width: number, opt
 		const lineBg = item.marker === "+" ? addedBg : item.marker === "-" ? removedBg : undefined;
 		const wordBg = item.marker === "+" ? addedWord : item.marker === "-" ? removedWord : undefined;
 		const code = item.code.replace(/\t/g, "        ");
-		const highlighted = options.highlight ? options.highlight(code) : code;
+		// Removed lines keep the plain text colour (`T==="-"` → `[[D(c),M]]`); ANSI themes draw them faint.
+		const highlighted = options.highlight && item.marker !== "-" ? options.highlight(code) : code;
 		const segments = applyBackground(ansiSegments(highlighted), lineBg, wordBg, ranges.get(item) ?? []);
 		const wrapped = wrapSegments(segments, codeWidth);
 		const deco = changed ? fgCodeOf(p, decoration(p, item.marker as "+" | "-")) : undefined;
@@ -307,7 +309,8 @@ export function renderDiffRows(p: Palette, items: DiffItem[], width: number, opt
 			} else {
 				line = `${p.dim(gutterText)} ${serialize(row)}`;
 			}
-			out.push(options.dim ? p.dim(line) : line);
+			const faint = options.dim || (item.marker === "-" && p.id.endsWith("-ansi"));
+			out.push(faint ? p.dim(line) : line);
 		});
 	}
 	return out;
