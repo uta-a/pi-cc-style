@@ -42,6 +42,7 @@ import {
 	rejectReason,
 	renderPermissionPrompt,
 	commandPrefix,
+	describeRequest,
 } from "./permissions.ts";
 import { getSettings, isToolsExpanded, palette, readSettings, setSettings, setToolsExpanded, setUi } from "./runtime.ts";
 import { renderSpinner, SpinnerState } from "./spinner.ts";
@@ -373,6 +374,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 		if (!needsPrompt(permissions, event.toolName, input)) return undefined;
 		if (!ctx.hasUI) return { block: true, reason: "Permission required, but there is no UI to ask." };
 		const request = { toolName: event.toolName, input, cwd: ctx.cwd };
+		const values = describeRequest(palette(), request, 80).options.map((option) => option.value);
 		prompting++;
 		requestRender();
 		const answer = await ctx.ui
@@ -392,13 +394,13 @@ export default function piCcStyle(pi: ExtensionAPI) {
 						dialogTui.requestRender();
 						return;
 					}
-					if (matchesKey(data, Key.up)) selected = (selected + 2) % 3;
-					else if (matchesKey(data, Key.down)) selected = (selected + 1) % 3;
+					if (matchesKey(data, Key.up)) selected = (selected + values.length - 1) % values.length;
+					else if (matchesKey(data, Key.down)) selected = (selected + 1) % values.length;
 					else if (matchesKey(data, Key.tab)) feedback = { active: true, text: "" };
 					else if (matchesKey(data, Key.shift("tab")) && event.toolName !== "bash") return done({ value: "yes-session" });
 					else if (matchesKey(data, Key.escape)) return done({ value: "no" });
-					else if (data === "1" || data === "2" || data === "3") return done({ value: (["yes", "yes-session", "no"] as const)[Number(data) - 1]! });
-					else if (matchesKey(data, Key.enter)) return done({ value: (["yes", "yes-session", "no"] as const)[selected]! });
+					else if (/^[1-9]$/.test(data) && Number(data) <= values.length) return done({ value: values[Number(data) - 1]! });
+					else if (matchesKey(data, Key.enter)) return done({ value: values[selected]! });
 					dialogTui.requestRender();
 				},
 			};

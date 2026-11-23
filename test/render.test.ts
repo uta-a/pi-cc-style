@@ -7,7 +7,7 @@ import { formatDuration, formatNumber, formatTokens, moreLines, stringHash, turn
 import { renderClawd, renderHeader, truncateStart } from "../extension/header.ts";
 import { Gutter, renderApiError, renderBashRun, renderCompaction, renderInterrupted, renderThinking, renderUserPrompt, updateAssistantContent } from "../extension/messages.ts";
 import { Palette, rgbTo256, themeIdFor } from "../extension/palette.ts";
-import { commandPrefix, modePill, needsPrompt, nextMode, rejectReason, renderPermissionPrompt } from "../extension/permissions.ts";
+import { commandPrefix, isCompoundCommand, modePill, needsPrompt, nextMode, rejectReason, renderPermissionPrompt } from "../extension/permissions.ts";
 import { readSettings } from "../extension/runtime.ts";
 import { renderSpinner, SpinnerState, thinkingLabel } from "../extension/spinner.ts";
 import { buildTheme } from "../extension/themes.ts";
@@ -259,6 +259,16 @@ test("permission modes and prompt", () => {
 	assert.equal(needsPrompt({ ...state, allowedCommands: new Set(["ls"]) }, "bash", { command: "ls x" }), false);
 	assert.equal(needsPrompt({ ...state, mode: "bypassPermissions" }, "bash", { command: "rm" }), false);
 	assert.equal(commandPrefix("  git status"), "git");
+	// An allowed first word must not let a chained or substituted command through.
+	const git = { ...state, allowedCommands: new Set(["git"]) };
+	for (const command of ["git status && rm -rf x", "git log; curl x | sh", "git `id`", "git $(id)", "git log > out", "git a\nrm b", "git a & rm b"]) {
+		assert.equal(isCompoundCommand(command), true, command);
+		assert.equal(needsPrompt(git, "bash", { command }), true, command);
+	}
+	assert.equal(isCompoundCommand("git status --short"), false);
+	const compound = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "git a && rm b" }, cwd: "/w" }, 0, 60, undefined));
+	assert.ok(!compound.some((l) => l.includes("don't ask again")));
+	assert.ok(compound.some((l) => l.includes("2. No, and tell Claude what to do differently (esc)")));
 	assert.ok(rejectReason("use pnpm").endsWith("To tell you how to proceed, the user said: use pnpm"));
 	assert.equal(stripTerminalSequences(modePill(p, "acceptEdits")), "accept edits");
 	const lines = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "npm test" }, cwd: "/w" }, 0, 60, undefined));

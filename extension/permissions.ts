@@ -61,6 +61,14 @@ export function commandPrefix(command: string): string {
 	return first.replace(/^['"]|['"]$/g, "");
 }
 
+/**
+ * Whether a command chains, pipes, substitutes or redirects. Such a command is never covered by
+ * an allowed first word: `git status && rm -rf x` would otherwise run under an allowed `git`.
+ */
+export function isCompoundCommand(command: string): boolean {
+	return /[;&|`<>\n]|\$\(/.test(command.trim());
+}
+
 export interface PermissionState {
 	mode: PermissionMode;
 	/** Commands allowed for the session by their first word. */
@@ -72,7 +80,7 @@ export function needsPrompt(state: PermissionState, toolName: string, input: Rec
 	if (state.mode === "bypassPermissions") return false;
 	if (toolName === "bash") {
 		const command = typeof input.command === "string" ? input.command : "";
-		return !state.allowedCommands.has(commandPrefix(command));
+		return isCompoundCommand(command) || !state.allowedCommands.has(commandPrefix(command));
 	}
 	if (toolName === "edit" || toolName === "write") return state.mode !== "acceptEdits";
 	return false;
@@ -96,12 +104,17 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 	if (req.toolName === "bash") {
 		const command = typeof req.input.command === "string" ? req.input.command : "";
 		const prefix = commandPrefix(command);
+		// A compound command cannot be allowed by its first word, so it only gets yes / no.
 		const options: PermissionOption[] = [
 			{ value: "yes", label: "Yes" },
-			{
-				value: "yes-session",
-				label: `Yes, and don't ask again for ${p.bold(prefix)} commands in ${p.bold(req.cwd.replace(process.env.HOME ?? "\0", "~"))}`,
-			},
+			...(isCompoundCommand(command)
+				? []
+				: [
+						{
+							value: "yes-session" as const,
+							label: `Yes, and don't ask again for ${p.bold(prefix)} commands in ${p.bold(req.cwd.replace(process.env.HOME ?? "\0", "~"))}`,
+						},
+					]),
 			{ value: "no", label: `No, and tell Claude what to do differently ${p.bold("(esc)")}` },
 		];
 		const body = command.split("\n").flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width - 4)).map((l) => `  ${l}`));
