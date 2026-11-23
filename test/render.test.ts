@@ -287,6 +287,8 @@ test("permission modes and prompt", () => {
 test("allowed prefixes cover one program or subcommand in one directory", () => {
 	assert.equal(commandPrefix("  git status --short"), "git status");
 	assert.equal(commandPrefix("ls -la"), "ls");
+	assert.equal(commandPrefix("/usr/bin/git status"), "/usr/bin/git status");
+	assert.equal(commandPrefix("/usr/bin/git -c alias.x='!rm' x"), undefined);
 	for (const command of ["git -c core.fsmonitor='rm -rf ~' status", "CI=1 npm test", "env rm -rf x", "sh -c 'rm x'", "node -e 'x'", "find . -exec rm {} +", "xargs rm", "sudo ls", "/usr/bin/env rm", "\"ls\" x"]) {
 		assert.equal(commandPrefix(command), undefined, command);
 	}

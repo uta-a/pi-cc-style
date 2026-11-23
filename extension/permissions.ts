@@ -103,7 +103,8 @@ export function commandPrefix(command: string): string | undefined {
 	if (isCompoundCommand(command)) return undefined;
 	const [first, second] = words(command);
 	if (!first || !WORD.test(first) || RUNS_ANYTHING.has(basename(first))) return undefined;
-	if (!HAS_SUBCOMMANDS.has(first)) return first;
+	// By the program's name, so `/usr/bin/git` is a subcommand tool too.
+	if (!HAS_SUBCOMMANDS.has(first) && !HAS_SUBCOMMANDS.has(basename(first))) return first;
 	return second && SUBCOMMAND.test(second) ? `${first} ${second}` : undefined;
 }
 
