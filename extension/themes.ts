@@ -8,39 +8,42 @@ export const THEME_IDS: CCThemeId[] = ["dark", "light", "dark-ansi", "light-ansi
 
 export const themeName = (id: CCThemeId) => `claude-code-${id}`;
 
-/** Syntax colours: Claude Code highlights with its native diff/highlight module; these follow its VS Code-like defaults. */
+/**
+ * Syntax colours of Claude Code's highlighter (`ee`): "Monokai Extended" on dark themes, "GitHub"
+ * on light themes, ANSI indices on the ANSI themes. The default foreground stays the terminal's.
+ */
 const SYNTAX = {
 	dark: {
-		syntaxComment: "#6a9955",
-		syntaxKeyword: "#569cd6",
-		syntaxFunction: "#dcdcaa",
-		syntaxVariable: "#9cdcfe",
-		syntaxString: "#ce9178",
-		syntaxNumber: "#b5cea8",
-		syntaxType: "#4ec9b0",
-		syntaxOperator: "#d4d4d4",
-		syntaxPunctuation: "#d4d4d4",
+		syntaxComment: "#75715e",
+		syntaxKeyword: "#f92672",
+		syntaxFunction: "#a6e22e",
+		syntaxVariable: "",
+		syntaxString: "#e6db74",
+		syntaxNumber: "#be84ff",
+		syntaxType: "#a6e22e",
+		syntaxOperator: "#f92672",
+		syntaxPunctuation: "",
 	},
 	light: {
-		syntaxComment: "#008000",
-		syntaxKeyword: "#0000ff",
-		syntaxFunction: "#795e26",
-		syntaxVariable: "#001080",
-		syntaxString: "#a31515",
-		syntaxNumber: "#098658",
-		syntaxType: "#267f99",
-		syntaxOperator: "#000000",
-		syntaxPunctuation: "#000000",
+		syntaxComment: "#969896",
+		syntaxKeyword: "#a71d5d",
+		syntaxFunction: "#795da3",
+		syntaxVariable: "#0086b3",
+		syntaxString: "#183691",
+		syntaxNumber: "#0086b3",
+		syntaxType: "#0086b3",
+		syntaxOperator: "#a71d5d",
+		syntaxPunctuation: "",
 	},
 	ansi: {
 		syntaxComment: 8,
-		syntaxKeyword: 12,
+		syntaxKeyword: 13,
 		syntaxFunction: 11,
-		syntaxVariable: 14,
-		syntaxString: 9,
-		syntaxNumber: 10,
-		syntaxType: 6,
-		syntaxOperator: "",
+		syntaxVariable: "",
+		syntaxString: 10,
+		syntaxNumber: 12,
+		syntaxType: 14,
+		syntaxOperator: 13,
 		syntaxPunctuation: "",
 	},
 } as const;
