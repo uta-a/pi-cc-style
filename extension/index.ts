@@ -261,7 +261,13 @@ export default function piCcStyle(pi: ExtensionAPI) {
 				"cc-style-spinner",
 				(widgetTui) => {
 					tui = widgetTui;
-					return new Lines((width) => renderSpinner(palette(), spinner, { now: Date.now(), width }));
+					return new Lines((width) =>
+						renderSpinner(palette(), spinner, {
+							now: Date.now(),
+							width,
+							effort: currentCtx?.model?.reasoning ? pi.getThinkingLevel() : undefined,
+						}),
+					);
 				},
 				{ placement: "aboveEditor" },
 			);
@@ -382,7 +388,8 @@ export default function piCcStyle(pi: ExtensionAPI) {
 			| { stopReason?: string }
 			| undefined;
 		if (last?.stopReason === "aborted" || last?.stopReason === "error") return;
-		pi.appendEntry<TurnEntryData>(TURN_ENTRY, { id: randomUUID(), durationMs: Date.now() - startedAt });
+		const endedAt = Date.now();
+		pi.appendEntry<TurnEntryData>(TURN_ENTRY, { id: randomUUID(), durationMs: endedAt - startedAt, endedAt });
 	});
 
 	// Permission prompt.

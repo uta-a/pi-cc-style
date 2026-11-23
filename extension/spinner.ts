@@ -147,6 +147,8 @@ export interface SpinnerRender {
 	/** Color of the verb and glyph; Claude Code uses `claude` for the main loop. */
 	messageColor?: string;
 	shimmerColor?: string;
+	/** The thinking effort, appended to the thinking label (` with high effort`). */
+	effort?: string;
 }
 
 /** The spinner row, or nothing when idle. Includes the blank line above it (`marginTop: 1`). */
@@ -208,7 +210,7 @@ export function renderSpinner(p: Palette, state: SpinnerState, options: SpinnerR
 	let thinkingText: string | undefined;
 	let thinkingKind: "thinking" | "thought" | undefined;
 	if (state.mode === "thinking" && state.thinkingStartedAt !== undefined && state.activeTools === 0) {
-		thinkingText = thinkingLabel(now - state.thinkingStartedAt);
+		thinkingText = `${thinkingLabel(now - state.thinkingStartedAt)}${options.effort && options.effort !== "off" ? ` with ${options.effort} effort` : ""}`;
 		thinkingKind = "thinking";
 	} else if (state.thought && now >= state.thought.showFrom && now < state.thought.showUntil) {
 		thinkingText = thoughtFor(state.thought.ms);

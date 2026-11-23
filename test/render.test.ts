@@ -12,7 +12,7 @@ import { palette, readSettings, settingsProblems, setUi } from "../extension/run
 import { renderSpinner, SpinnerState, thinkingLabel } from "../extension/spinner.ts";
 import { buildTheme } from "../extension/themes.ts";
 import { BUILTIN_VIEWS, CallRow, callRow, displayPath, fullOutput, genericArgs, hardWrap, ResultRows, truncatedOutput } from "../extension/tools.ts";
-import { renderPromptFooter, renderTurnSummary } from "../extension/turn.ts";
+import { formatDoneTime, renderPromptFooter, renderTurnSummary } from "../extension/turn.ts";
 
 const p = new Palette("dark", "truecolor");
 const plain = (lines: string[]) => lines.map((l) => stripTerminalSequences(l));
@@ -219,6 +219,10 @@ test("spinner: glyph, verb, parenthesis", () => {
 	s.delta("thinking", 10, 2000);
 	const thinking = plain(renderSpinner(p, s, { now: 2500, width: 80, frames: ["a"] }))[1]!;
 	assert.ok(thinking.endsWith("· thinking)"));
+	const effort = plain(renderSpinner(p, s, { now: 2500, width: 80, frames: ["a"], effort: "high" }))[1]!;
+	assert.ok(effort.endsWith("· thinking with high effort)"));
+	const narrow = plain(renderSpinner(p, s, { now: 2500, width: 40, frames: ["a"], effort: "high" }))[1]!;
+	assert.ok(narrow.includes("thinking") && !narrow.includes("effort"));
 	s.stop();
 	assert.deepEqual(renderSpinner(p, s, { now: 3000, width: 80 }), []);
 	assert.equal(thinkingLabel(46000), "deep in thought");
@@ -335,6 +339,10 @@ test("settings: a misspelt permission mode falls back to manual", () => {
 
 test("turn summary and prompt footer", () => {
 	assert.deepEqual(plain(renderTurnSummary(p, { id: "abc", durationMs: 65_000 })), [`✻ ${turnVerb("abc")} for 1m 5s`]);
+	const at = new Date(2026, 10, 23, 15, 4).getTime();
+	assert.deepEqual(plain(renderTurnSummary(p, { id: "abc", durationMs: 65_000, endedAt: at }, at + 60_000)), [`✻ ${turnVerb("abc")} for 1m 5s · done ${formatDoneTime(at, at + 60_000)}`]);
+	assert.equal(formatDoneTime(at, at + 60_000, "en-US"), "3:04 PM");
+	assert.equal(formatDoneTime(at, at + 2 * 86_400_000, "en-US"), "Mon 3:04 PM");
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "default", false)), "  ? for shortcuts");
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "default", true)), "  esc to interrupt");
 	assert.equal(stripTerminalSequences(renderPromptFooter(p, "acceptEdits", false)), "  accept edits · shift+tab to cycle");
