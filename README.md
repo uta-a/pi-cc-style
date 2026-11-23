@@ -83,14 +83,14 @@ pi は何も確認せずにツールを実行します。これは Claude Code �
 
 | モード | 確認するもの |
 |---|---|
-| manual | bash、edit、write |
-| accept edits | bash |
-| plan | bash、edit、write |
+| manual | bash、powershell、edit、write |
+| accept edits | bash、powershell、作業ディレクトリの外と `.git/` の中への edit / write |
+| plan | bash、powershell、edit、write |
 | bypass permissions | なし |
 
 - 入力欄にフォーカスがあるとき、shift+tab で順に切り替えます。`/cc-mode <mode>` でも指定できます（`manual` は `default` の別名）。Claude Code と同じく、bypass permissions が循環に入るのは、起動時のモードが bypass permissions だった場合と `/cc-mode bypassPermissions` で選んだ場合だけです。pi の shift+tab（thinking レベルの切り替え）はこの拡張が受け取ります。thinking レベルを shift+tab で変えたい場合は `"modeCycle": false` にしてください
 - 確認ダイアログ: `1` / `2` / `3` か ↑↓ と Enter。ダイアログが開いてから 300ms のあいだのキーは無視します（入力中の Enter で承認されないように）。`3` か Esc で拒否すると、Claude Code と同じ文面（止まってユーザーの指示を待つよう求めるもの）をツールの結果としてモデルに返し、ターンの終了を要求します。同じ応答に含まれる残りのツール呼び出しも、確認せずに拒否します。Tab で理由を書き添えられます
-- `2` は、edit / write なら accept edits に切り替えます（ダイアログ内の shift+tab も同じ）。bash なら、そのコマンドのプレフィックスを、そのセッション・その作業ディレクトリに限って許可します
+- `2` は、edit / write なら accept edits に切り替えます（ダイアログ内の shift+tab も同じ。作業ディレクトリの外のファイルでは出しません）。bash なら、そのコマンドのプレフィックスを、そのセッション・その作業ディレクトリに限って許可します
   - プレフィックスはプログラム名です。git、npm、cargo、docker などサブコマンドを持つものは `git status` のように2語で、`git push` は別に確認します
   - 次のコマンドには `2` を出しません（常に確認します）: `;` `&` `|` `<` `>` バッククォート `$(` 改行を含むもの、先頭に `VAR=1` があるもの、`env` / `sh` / `bash` / `eval` / `xargs` / `sudo` / `find` / `sed` / `awk` / `node` / `python` などほかのプログラムやコードを実行できるもの、サブコマンドの前にフラグがあるもの（`git -c …`）
   - それでも許可は文字列の前方一致です。`npm run` を許可すると package.json のどのスクリプトも実行されます。安全性の判断には使わず、手間を減らすためのものと考えてください

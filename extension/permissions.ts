@@ -215,13 +215,19 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 		const title = req.toolName === "bash" ? "Bash command" : "PowerShell command";
 		return { title, body: [...body, ...description], question: "Do you want to proceed?", options };
 	}
+	// accept edits would not cover a file outside the working directory, so it is not offered there.
+	const inside = rawPath ? isInsideWorkspace(rawPath, req.cwd) : false;
 	const editOptions = (): PermissionOption[] => [
 		{ value: "yes", label: "Yes" },
 		// `sZe` + `Vs.acceptEdits`, then the cycle key in bold.
-		{
-			value: "yes-session",
-			label: `Yes, and switch to ${p.bold("accept edits (auto-approve file edits and common file commands)")} for this session ${p.bold("(shift+tab)")}`,
-		},
+		...(inside
+			? [
+					{
+						value: "yes-session" as const,
+						label: `Yes, and switch to ${p.bold("accept edits (auto-approve file edits and common file commands)")} for this session ${p.bold("(shift+tab)")}`,
+					},
+				]
+			: []),
 		{ value: "no", label: "No" },
 	];
 	if (req.toolName === "write") {

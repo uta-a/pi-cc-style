@@ -282,6 +282,9 @@ test("permission modes and prompt", () => {
 	assert.ok(amending.includes(" ❯ 3. No and tell Claude what to do differently"));
 	const edit = plain(renderPermissionPrompt(p, { toolName: "write", input: { path: "/w/src/a.ts", content: "x" }, cwd: "/w" }, 0, 60, undefined));
 	assert.ok(edit.includes("   src/a.ts"));
+	assert.ok(edit.some((l) => l.includes("switch to accept edits")));
+	const outside = plain(renderPermissionPrompt(p, { toolName: "write", input: { path: "/etc/hosts", content: "x" }, cwd: "/w" }, 0, 60, undefined));
+	assert.ok(!outside.some((l) => l.includes("switch to accept edits")));
 });
 
 test("allowed prefixes cover one program or subcommand in one directory", () => {
