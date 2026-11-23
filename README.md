@@ -148,6 +148,8 @@ pi は何も確認せずにツールを実行します。これは Claude Code �
 - スピナーの30秒後の Tips、`?` で開くショートカット一覧、全画面モード（スクロール・クリック展開）はない
 - thinking と編集・Bash までを1行にまとめる要約行（`Thought for 5s, read 3 files, …`）は再現していない。まとめるのは連続した read / grep / find / ls だけ
 - トークン数は応答の文字数÷4（Claude Code と同じ近似）。数え上げのアニメーションはしない
+- pi の ls の結果は `Listed N paths` と出す（Claude Code に ls ツールはなく、近い文言がない）
+- まとめ行の進行中に失敗した呼び出しの件数（`N failed`）は出さない
 - compaction・再試行中の表示は pi のもの
 - ステータスラインは pi-cc-statusline、TODO は pi-claude-todo が担当する
 - 別プロセスとして起動されたサブエージェント（`PI_SUBAGENT_CHILD` / `PI_SUBAGENT_PARENT_SESSION` が付くもの）の中では何もしない。そのプロセスの bash / edit / write は確認されない
