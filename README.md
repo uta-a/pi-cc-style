@@ -42,7 +42,7 @@ pi の見た目と UI の挙動を Claude Code 2.1.330 に合わせる pi 拡張
 | thinking | `∴` と、空白をまとめた thinking を薄い斜体で表示 |
 | ツール行 | `⏺ Read(path)`。点は待機中は薄く、実行中は 600ms ごとに点滅、終了で success / error。結果は `  ⎿  ` の下に出す |
 | ツールの要約 | `Read N lines`、`Found N lines` / `files`、`Wrote N lines to path` とプレビュー10行、`Added N lines, removed M lines` と diff、Bash の出力は幅-10で折り返して先頭3行と `… +N lines (ctrl+o to expand)` |
-| まとめ表示 | 連続した read / grep / find / ls（1件から）を `Searched for N patterns, read N files (ctrl+o to expand)` の1行にまとめる。終わると点を消して行全体を薄く、件数は太字、同じファイルは1件と数える。実行中は点と、直近の対象を `⎿` の下に出す。ctrl+o で個別表示 |
+| まとめ表示 | 連続した read / grep / find / ls（1件から）を `Searched for N patterns, read N files (ctrl+o to expand)` の1行にまとめる。終わると点を消して行全体を薄く、失敗があれば ` · N failed` を error 色で付ける。件数は太字、同じファイルは1件と数える。実行中は点と、直近の対象を `⎿` の下に出す。ctrl+o で個別表示 |
 | diff | 行番号のガター、追加・削除行の背景、変更が4割以下の組は変わった語だけ強調、長い行は折り返し |
 | スピナー | `· ✢ ✳ ✶ ✻ ✽` を2秒周期で往復、動詞187語から1つ、3文字のきらめき、10秒無応答で error 色へ、thinking が長いと warning 色へ。括弧内は経過時間・`↓ N tokens`・thinking の状態（`still thinking`、`thought for Ns` など）を幅に収まる分だけ |
 | ターン終了 | `✻ Cooked for 1m 5s`（動詞8語からメッセージごとに決まる） |
@@ -149,7 +149,6 @@ pi は何も確認せずにツールを実行します。これは Claude Code �
 - thinking と編集・Bash までを1行にまとめる要約行（`Thought for 5s, read 3 files, …`）は再現していない。まとめるのは連続した read / grep / find / ls だけ
 - トークン数は応答の文字数÷4（Claude Code と同じ近似）。数え上げのアニメーションはしない
 - pi の ls の結果は `Listed N paths` と出す（Claude Code に ls ツールはなく、近い文言がない）
-- まとめ行の進行中に失敗した呼び出しの件数（`N failed`）は出さない
 - compaction・再試行中の表示は pi のもの
 - ステータスラインは pi-cc-statusline、TODO は pi-claude-todo が担当する
 - 別プロセスとして起動されたサブエージェント（`PI_SUBAGENT_CHILD` / `PI_SUBAGENT_PARENT_SESSION` が付くもの）の中では何もしない。そのプロセスの bash / edit / write は確認されない

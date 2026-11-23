@@ -386,6 +386,10 @@ test("reads and searches collapse into one row, a single one included", async ()
 	const finished = renderGroupRows(p, groups, ["a", "b", "a2"], "ctrl+o");
 	// Done: no dot, faint, the same file counted once.
 	assert.deepEqual(plain(finished), ["  Searched for 1 pattern, read 1 file (ctrl+o to expand)"]);
+	groups.setState("b", { ...done, isError: true });
+	const withFailure = renderGroupRows(p, groups, ["a", "b", "a2"], "ctrl+o");
+	assert.deepEqual(plain(withFailure), ["  Searched for 1 pattern, read 1 file · 1 failed (ctrl+o to expand)"]);
+	groups.setState("b", done);
 	groups.setState("d", done);
 	groups.setState("e", { ...done, isPartial: true });
 	const running = plain(renderGroupRows(p, groups, ["d", "e"], "ctrl+o", (t, k) => (k === "search" ? `"${t}"` : t), 0));

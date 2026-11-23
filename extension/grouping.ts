@@ -2,7 +2,7 @@
  * Claude Code collapses a run of read and search calls, a single one included, into one row while
  * the transcript is not expanded (`collapsed_read_search` → `oc` / `Ey` of 2.1.330):
  *
- *     Searched for 2 patterns, read 3 files (ctrl+o to expand)        (done: no dot, all faint)
+ *     Searched for 2 patterns, read 3 files · 1 failed (ctrl+o to expand)   (done: no dot, faint)
  *   ⏺ Searching for 1 pattern, reading 2 files… (ctrl+o to expand)   (running: the tool dot)
  *     ⎿  src/session.ts                                              (running: the latest target)
  *
@@ -189,6 +189,7 @@ export function renderGroupRows(
 	const paths = new Set<string>();
 	let running = false;
 	let started = false;
+	let failedCount = 0;
 	let latest: { target: string; kind: "search" | "read" | "list" } | undefined;
 	for (const id of ids) {
 		const kind = COLLAPSIBLE[groups.nameOf(id) ?? ""];
@@ -199,6 +200,7 @@ export function renderGroupRows(
 		const state = groups.stateOf(id);
 		if (!state || state.isPartial) running = true;
 		if (state?.executionStarted) started = true;
+		if (state?.isError && !state.isPartial) failedCount++;
 	}
 	counts.read = paths.size;
 	const parts = groupSummaryParts(counts, running);
@@ -206,7 +208,9 @@ export function renderGroupRows(
 	if (!running) {
 		// Done: no dot, the whole row faint with the counts bold.
 		const text = parts.map((part) => p.style(part.text, { dim: true, bold: part.count })).join("");
-		return [`  ${text}${p.dim(hint)}`];
+		// `Xp`: once done, failed calls are counted in `error` after a separator.
+		const failed = failedCount > 0 ? `${p.dim(" · ")}${p.fg("error", `${failedCount} failed`)}` : "";
+		return [`  ${text}${failed}${p.dim(hint)}`];
 	}
 	const dot = !started ? p.dim(DOT) : Math.floor(now / 600) % 2 === 0 ? p.dim(DOT) : " ";
 	const text = parts.map((part) => (part.count ? p.bold(part.text) : part.text)).join("");
