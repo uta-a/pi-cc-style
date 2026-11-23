@@ -12,6 +12,7 @@
 import { Markdown, type MarkdownTheme, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { clampLines, DOT, ELLIPSIS, POINTER, RESULT_INDENT, RESULT_PREFIX, sanitize, THEREFORE } from "./format.ts";
 import type { Palette } from "./palette.ts";
+import { isToolsExpanded } from "./runtime.ts";
 
 export interface Component {
 	render(width: number): string[];
@@ -57,16 +58,20 @@ export class Lines implements Component {
 export class CachedLines implements Component {
 	private readonly draw: (width: number) => string[];
 	private readonly palette: () => Palette;
-	private cache: { width: number; palette: Palette; lines: string[] } | undefined;
-	constructor(draw: (width: number) => string[], palette: () => Palette) {
+	private readonly variant: () => unknown;
+	private cache: { width: number; palette: Palette; variant: unknown; lines: string[] } | undefined;
+	/** `variant` is any other input of `draw` (such as the expanded state). */
+	constructor(draw: (width: number) => string[], palette: () => Palette, variant: () => unknown = () => undefined) {
 		this.draw = draw;
 		this.palette = palette;
+		this.variant = variant;
 	}
 	render(width: number): string[] {
 		const p = this.palette();
-		if (this.cache && this.cache.width === width && this.cache.palette === p) return this.cache.lines;
+		const variant = this.variant();
+		if (this.cache && this.cache.width === width && this.cache.palette === p && this.cache.variant === variant) return this.cache.lines;
 		const lines = this.draw(width);
-		this.cache = { width, palette: p, lines };
+		this.cache = { width, palette: p, variant, lines };
 		return lines;
 	}
 	invalidate() {
@@ -94,12 +99,19 @@ export function renderUserPrompt(p: Palette, text: string, width: number): strin
 	});
 }
 
-/** Thinking row: `∴` and the thinking on one paragraph, both dim; the thinking italic. */
-export function renderThinking(p: Palette, thinking: string, width: number): string[] {
-	const text = thinking.replace(/\s+/g, " ").trim();
-	const lines = wrapTextWithAnsi(text, Math.max(1, width - 2));
+/**
+ * Thinking row (`Ur`): `∴` and the thinking on one paragraph, both dim, the thinking italic. With
+ * the transcript expanded the thinking keeps its lines and is dim without italics.
+ */
+export function renderThinking(p: Palette, thinking: string, width: number, expanded = false): string[] {
+	const room = Math.max(1, width - 2);
+	const lines = expanded
+		? sanitize(thinking.trim())
+				.split("\n")
+				.flatMap((line) => (line ? wrapTextWithAnsi(line, room) : [""]))
+		: wrapTextWithAnsi(sanitize(thinking).replace(/\s+/g, " ").trim(), room);
 	return clampLines(
-		lines.map((line, i) => `${i === 0 ? p.dim(THEREFORE) + " " : "  "}${p.style(line, { dim: true, italic: true })}`),
+		lines.map((line, i) => `${i === 0 ? p.dim(THEREFORE) + " " : "  "}${expanded ? p.dim(line) : p.style(line, { dim: true, italic: true })}`),
 		width,
 	);
 }
@@ -238,7 +250,7 @@ export function updateAssistantContent(
 			const label = (this.hiddenThinkingLabel ?? "").trim();
 			if (hidden && !label) continue;
 			const text = hidden ? label.replace(/\.\.\.$/, ELLIPSIS) : parts.join("\n\n");
-			add(new CachedLines((width) => renderThinking(getPalette(), text, width), getPalette));
+			add(new CachedLines((width) => renderThinking(getPalette(), text, width, isToolsExpanded()), getPalette, isToolsExpanded));
 			needsSpacer = true;
 		}
 	}

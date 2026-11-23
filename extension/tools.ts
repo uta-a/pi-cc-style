@@ -46,8 +46,16 @@ export function callRow(p: Palette, state: ToolCallState, name: string, args: st
 		);
 		return clampLines(rows, width);
 	}
-	const inner = room > 1 ? truncateToWidth(args, room, ELLIPSIS) : "";
-	return [truncateToWidth(`${head}(${inner})`, width, "")];
+	// A command may keep two lines (`v` of the Bash tool); each row is cut to the width.
+	const lines = args.split("\n");
+	if (lines.length === 1) {
+		const inner = room > 1 ? truncateToWidth(args, room, ELLIPSIS) : "";
+		return [truncateToWidth(`${head}(${inner})`, width, "")];
+	}
+	return clampLines(
+		lines.map((line, i) => `${i === 0 ? `${head}(` : "  "}${line}${i === lines.length - 1 ? ")" : ""}`),
+		width,
+	);
 }
 
 function wrapPlain(text: string, width: number): string[] {
@@ -119,6 +127,25 @@ export function displayPath(path: string | undefined, cwd: string): string {
 		return tildify(path);
 	}
 	return path;
+}
+
+/** `v` of the Bash tool: at most two lines and 160 characters, then `…` with no space. */
+export function commandPreview(text: string): string {
+	const command = text.replace(/\r/g, "");
+	const lines = command.split("\n");
+	const tooManyLines = lines.length > 2;
+	if (!tooManyLines && command.length <= 160) return command;
+	let shown = tooManyLines ? lines.slice(0, 2).join("\n") : command;
+	if (shown.length > 160) shown = shown.slice(0, 160);
+	return `${shown.trim()}${ELLIPSIS}`;
+}
+
+/** `dn`: a byte count as `512 bytes`, `12.3KB`, `1.2MB`. */
+export function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} bytes`;
+	const unit = bytes < 1024 * 1024 ? "KB" : "MB";
+	const value = bytes / (unit === "KB" ? 1024 : 1024 * 1024);
+	return `${value.toFixed(1).replace(/\.0$/, "")}${unit}`;
 }
 
 /** Collapses a command to the first line for the one-line call row. */
@@ -239,7 +266,10 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 		result(p, _args, result, ctx) {
 			if (ctx.isError) return errorRows(p, resultText(result), ctx);
 			const image = result.content?.find((c) => c.type === "image");
-			if (image) return ["Read image"];
+			if (image) {
+				const bytes = image.data ? Math.floor((image.data.replace(/=+$/, "").length * 3) / 4) : 0;
+				return [bytes > 0 ? `Read image (${formatBytes(bytes)})` : "Read image"];
+			}
 			const n = countLines(stripNotices(resultText(result)));
 			return [`Read ${b(p, n)} ${plural(n, "line")}`];
 		},
@@ -248,7 +278,7 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 		name: "Bash",
 		args(args, ctx) {
 			const command = str(args.command);
-			return ctx.expanded ? command : oneLine(command);
+			return ctx.expanded ? command : commandPreview(command);
 		},
 		result(p, _args, result, ctx, width) {
 			const text = resultText(result);

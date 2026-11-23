@@ -29,7 +29,7 @@
 | まとめ表示 | `collapsed_read_search` → `oc` / `Ey`、`oo`、`R9e`（集計） | 1件からまとめる、終了後は点なしで dim、件数 bold、read は `readFilePaths.size`、進行中は `-ing` と `…` と直近の対象（`latestDisplayHint`） | `extension/grouping.ts` |
 | diff | color-diff（`ee` `Te` `We` `_e` `ue` `He` `Pe`） | ガター ` N `、記号、行背景、語の強調（0.4 以下）、幅 `columns-12`、Monokai Extended / GitHub | `extension/diff.ts` |
 | スピナー | `Iya` `De` `Omt` `i7n` `On` `Ln` `Oya` `$n` `tt` `Wse` `PIt` | 本文冒頭の説明のとおり | `extension/spinner.ts` |
-| 動詞 | `b`（185語）、`jy`（8語）、`Wy`、`fse` | 一覧とハッシュによる選び方 | `extension/format.ts` |
+| 動詞 | `b`（187語）、`jy`（8語）、`Wy`、`fse` | 一覧とハッシュによる選び方 | `extension/format.ts` |
 | ターン終了 | `iM` `lM` `VMn` | `✻ <Verb> for <time>`、完了したターンだけ | `extension/turn.ts` |
 | 入力欄 | `jpt` `pbn` `zwa` | 上下だけの round 罫線、`❯`+NBSP、`Try "…"` | `extension/editor.ts` |
 | 入力欄の下 | `ylt` `yD` `Uut` `YC` `Dr`（全画面版は `jRe` `eH`） | inline 版: `⏵⏵ accept edits on` をモードの色、dim の ` (shift+tab to cycle)`、`esc to interrupt`、`? for shortcuts` | `extension/turn.ts`（`renderPromptFooter`） |

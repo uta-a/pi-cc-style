@@ -31,7 +31,7 @@ import {
 import { Key, matchesKey, stripTerminalSequences, type TUI } from "@earendil-works/pi-tui";
 import { decorateEditor } from "./editor.ts";
 import { COLLAPSIBLE, ToolGroups } from "./grouping.ts";
-import { PROMPT_EXAMPLES, sanitize, tildify } from "./format.ts";
+import { promptExample, sanitize, tildify } from "./format.ts";
 import { renderHeader } from "./header.ts";
 import { CachedLines, Lines, patchExtras, patchMessages } from "./messages.ts";
 import {
@@ -71,16 +71,14 @@ export function modelLabel(name: string | undefined): string | undefined {
 	return name.replace(/^Claude\s+/i, "").replace(/\s*\((?:1M|200k)[^)]*\)\s*$/i, "").replace(/\s+1M$/i, "");
 }
 
-function pickExample(cwd: string): string {
-	let file: string | undefined;
+function pickExample(cwd: string, seed: string): string {
+	let files: string[] = [];
 	try {
-		file = readdirSync(cwd).find((name) => /\.(ts|tsx|js|py|go|rs|rb|java|swift|kt)$/.test(name));
+		files = readdirSync(cwd).filter((name) => /\.(ts|tsx|js|py|go|rs|rb|java|swift|kt)$/.test(name)).slice(0, 5);
 	} catch {
-		file = undefined;
+		files = [];
 	}
-	const examples = file ? PROMPT_EXAMPLES : PROMPT_EXAMPLES.filter((e) => !e.includes("<file>"));
-	const example = examples[Math.floor(Math.random() * examples.length)] ?? "fix lint errors";
-	return `Try "${example.replace("<file>", file ?? "")}"`;
+	return promptExample(seed, files);
 }
 
 export default function piCcStyle(pi: ExtensionAPI) {
@@ -319,7 +317,13 @@ export default function piCcStyle(pi: ExtensionAPI) {
 		hasUserMessage = ctx.sessionManager
 			.getBranch()
 			.some((entry) => entry.type === "message" && (entry as { message?: { role?: string } }).message?.role === "user");
-		placeholder = pickExample(ctx.cwd);
+		let seed: string = randomUUID();
+		try {
+			seed = ctx.sessionManager.getSessionId() || seed;
+		} catch {
+			// Keep the random seed.
+		}
+		placeholder = pickExample(ctx.cwd, seed);
 		groups.reset();
 		for (const entry of ctx.sessionManager.getBranch()) {
 			const message = (entry as { type?: string; message?: { role?: string; content?: unknown; timestamp?: number } }).message;

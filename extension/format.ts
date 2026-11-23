@@ -158,16 +158,25 @@ export function spinnerFrames(term = process.env.TERM): string[] {
 }
 
 /** `zwa`: the empty-prompt examples. `<file>` is replaced by a file of the project when one is known. */
+/** `zwa`: the `Try "…"` examples; `<filepath>` is replaced by a file of the project when there is one. */
 export const PROMPT_EXAMPLES = [
 	"fix lint errors",
 	"fix typecheck errors",
-	"how does <file> work?",
-	"refactor <file>",
+	"how does <filepath> work?",
+	"refactor <filepath>",
 	"how do I log an error?",
-	"edit <file> to...",
-	"write a test for <file>",
-	"create a util logging.py that...",
+	"edit <filepath> to\u2026",
+	"write a test for <filepath>",
+	"create a util logging.py that\u2026",
 ];
+
+/** `zwa`: picks the file and the example by hashing the session id. */
+export function promptExample(seed: string, files: string[]): string {
+	const o = Math.abs(stringHash(seed));
+	const file = files[o % files.length] ?? "<filepath>";
+	const example = PROMPT_EXAMPLES[(o >>> 8) % PROMPT_EXAMPLES.length]!;
+	return `Try "${example.replace("<filepath>", file)}"`;
+}
 
 /** Shortens a path below the home directory to ~/… like Claude Code's `FP`. */
 export function tildify(path: string, home = process.env.HOME ?? ""): string {

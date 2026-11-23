@@ -447,3 +447,20 @@ test("the palette follows a theme change on the same theme object", () => {
 	assert.equal(palette().id, "dark");
 	setUi(undefined);
 });
+
+test("Bash call row, image size, Try examples and expanded thinking", async () => {
+	const { commandPreview, formatBytes } = await import("../extension/tools.ts");
+	const { promptExample } = await import("../extension/format.ts");
+	assert.equal(commandPreview("ls"), "ls");
+	assert.equal(commandPreview("a\nb\nc"), "a\nb…");
+	assert.equal(commandPreview("x".repeat(170)), `${"x".repeat(160)}…`);
+	const rows = plain(callRow(p, { executionStarted: true, isPartial: false, isError: false, hasResult: true, expanded: false }, "Bash", "a\nb…", 40));
+	assert.deepEqual(rows.map((r) => r.slice(2)), ["Bash(a", "b…)"]);
+	assert.equal(formatBytes(512), "512 bytes");
+	assert.equal(formatBytes(12_595), "12.3KB");
+	assert.match(promptExample("session", []), /^Try ".*"$/);
+	assert.ok(!promptExample("s", []).includes("..."));
+	for (const seed of ["s1", "s2", "s3", "s4"]) assert.ok(!promptExample(seed, ["a.ts"]).includes("<filepath>"));
+	const expanded = plain(renderThinking(p, "line one\n\nline two", 80, true));
+	assert.deepEqual(expanded, ["∴ line one", "  ", "  line two"]);
+});
