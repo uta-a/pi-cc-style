@@ -292,7 +292,7 @@ test("allowed prefixes cover one program or subcommand in one directory", () => 
 	assert.equal(commandPrefix("ls -la"), "ls");
 	assert.equal(commandPrefix("/usr/bin/git status"), "/usr/bin/git status");
 	assert.equal(commandPrefix("/usr/bin/git -c alias.x='!rm' x"), undefined);
-	for (const command of ["git -c core.fsmonitor='rm -rf ~' status", "CI=1 npm test", "env rm -rf x", "sh -c 'rm x'", "node -e 'x'", "find . -exec rm {} +", "xargs rm", "sudo ls", "/usr/bin/env rm", "\"ls\" x"]) {
+	for (const command of ["git -c core.fsmonitor='rm -rf ~' status", "CI=1 npm test", "env rm -rf x", "sh -c 'rm x'", "node -e 'x'", "find . -exec rm {} +", "xargs rm", "sudo ls", "/usr/bin/env rm", "\"ls\" x", "ls\tfoo", "ls\u2028x", "ls\u2029x", "ls \x1b", "ls \x1b[31mfoo\x1b[0m"]) {
 		assert.equal(commandPrefix(command), undefined, command);
 	}
 	const state = { mode: "default" as const, allowedCommands: new Set<string>() };
@@ -303,6 +303,9 @@ test("allowed prefixes cover one program or subcommand in one directory", () => 
 	assert.equal(needsPrompt(state, "bash", { command: "git push --force" }, "/w"), true);
 	assert.equal(needsPrompt(state, "bash", { command: "git status" }, "/elsewhere"), true);
 	assert.equal(needsPrompt(state, "bash", { command: "git -c alias.x='!rm -rf ~' x" }, "/w"), true);
+	for (const command of ["ls\tfoo", "ls\u2028x", "ls \x1b"]) {
+		assert.equal(needsPrompt(state, "bash", { command }, "/w"), true, command);
+	}
 	// An allowed prefix must not let a chained or substituted command through.
 	for (const command of ["git status && rm -rf x", "git status; curl x | sh", "git status `id`", "git status $(id)", "git status > out", "git status\nrm b", "git status & rm b", "ls\rrm x"]) {
 		assert.equal(isCompoundCommand(command), true, command);
@@ -472,4 +475,137 @@ test("Bash call row, image size, Try examples and expanded thinking", async () =
 	for (const seed of ["s1", "s2", "s3", "s4"]) assert.ok(!promptExample(seed, ["a.ts"]).includes("<filepath>"));
 	const expanded = plain(renderThinking(p, "line one\n\nline two", 80, true));
 	assert.deepEqual(expanded, ["∴ line one", "  ", "  line two"]);
+});
+
+test("diff word highlight aligns after tab expansion", () => {
+	const rows = renderDiffRows(p, parseDiff("-1 \tconst value = 1;\n+1 \tconst value = 2;"), 50);
+	assert.ok(rows[0]!.includes("\x1b[48;2;179;89;107m1\x1b[39;49m"), rows[0]);
+	assert.ok(rows[1]!.includes("\x1b[48;2;56;166;96m2\x1b[39;49m"), rows[1]);
+});
+
+test("diff expands tabs to 8-column stops and measures word threshold on raw code", () => {
+	const tabStop = plain(renderDiffRows(p, parseDiff("+1 ab\tc"), 40));
+	assert.equal(tabStop[0]!.trimEnd(), " 1 +ab      c");
+	const pair = renderDiffRows(p, parseDiff("-1 \ta\n+1 \tb"), 40);
+	assert.ok(!pair[0]!.includes("48;2;179;89;107"), pair[0]);
+	assert.ok(!pair[1]!.includes("48;2;56;166;96"), pair[1]);
+});
+
+test("edit view and permission prompt keep tabs for 8-column stops and raw word diff while sanitizing", () => {
+	const ctx = { cwd: "/w", expanded: false, isError: false, isPartial: false, expandKey: "ctrl+o" };
+	const rows = BUILTIN_VIEWS.edit!.result!(p, { path: "/w/f.ts" }, { content: [], details: { diff: "-1 \ta\n+1 \tb\n+2 ab\t\x1b[2Jc" } }, ctx, 60);
+	assert.ok(!rows.join("").includes("\x1b[2J"));
+	assert.equal(plain(rows)[3]!.trimEnd(), " 2 +ab      c");
+	assert.ok(!rows[1]!.includes("48;2;179;89;107"), rows[1]);
+	assert.ok(!rows[2]!.includes("48;2;56;166;96"), rows[2]);
+	const prompt = renderPermissionPrompt(
+		p,
+		{ toolName: "edit", input: { path: "/w/f.ts", oldText: "\ta\x1b]0;pwned\x07", newText: "\tb\nab\tc" }, cwd: "/w" },
+		0,
+		80,
+		undefined,
+	);
+	assert.ok(!prompt.join("").includes("\x1b]0;"));
+	assert.ok(plain(prompt).some((l) => l.includes(" 2 +ab      c")));
+	assert.ok(!prompt.join("").includes("48;2;179;89;107"));
+	assert.ok(!prompt.join("").includes("48;2;56;166;96"));
+});
+
+test("turn summary wraps at narrow width", () => {
+	const at = new Date(2026, 10, 23, 15, 4).getTime();
+	const data = { id: "abc", durationMs: 3_723_000, endedAt: at };
+	const lines = renderTurnSummary(p, data, at + 60_000, 20);
+	const stripped = plain(lines);
+	assert.ok(lines.length > 1);
+	assert.ok(lines.every((line) => visibleWidth(line) <= 20));
+	assert.ok(stripped[0]!.startsWith("✻ "));
+	assert.ok(stripped.slice(1).every((line) => line.startsWith("  ")));
+	assert.equal(stripped.map((line) => line.slice(2)).join(" "), plain(renderTurnSummary(p, data, at + 60_000))[0]!.slice(2));
+});
+
+test("decorateEditor updates options when re-applied to the same editor", () => {
+	const fake = {
+		paddingX: 1,
+		renderedVisibleLineCount: 1,
+		focused: true,
+		getText: () => "",
+		render(width: number) {
+			return ["─".repeat(width), " ".repeat(width), "─".repeat(width)];
+		},
+	};
+	decorateEditor(fake, { palette: () => p, enabled: () => true, placeholder: () => 'Try "old"' });
+	decorateEditor(fake, { palette: () => p, enabled: () => true, placeholder: () => 'Try "new"', busy: () => true });
+	const out = fake.render(24);
+	assert.ok(stripTerminalSequences(out[1]!).includes('Try "new"'));
+	assert.ok(out[1]!.startsWith("\x1b[2m❯"), "busy pointer uses latest options");
+});
+
+test("permission prompt checks raw command for prefix and shows absolute cwd", () => {
+	const cr = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "ls\rrm x" }, cwd: "/w" }, 0, 80, undefined));
+	assert.ok(!cr.some((l) => l.includes("don't ask again")));
+	const home = process.env.HOME;
+	if (home) {
+		const inside = `${home}/proj`;
+		const w = Math.max(120, home.length + 80);
+		const inHome = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "ls -la" }, cwd: inside }, 0, w, undefined));
+		assert.ok(inHome.some((l) => l.includes(`commands in ${inside}`)) && !inHome.some((l) => l.includes("~/proj")));
+		const sibling = `${home}_other/proj`;
+		const prompt = plain(renderPermissionPrompt(p, { toolName: "bash", input: { command: "ls -la" }, cwd: sibling }, 0, w, undefined));
+		assert.ok(prompt.some((l) => l.includes(sibling)) && !prompt.some((l) => l.includes("~_other")));
+	}
+});
+
+test("! commands and compaction sanitize terminal sequences", () => {
+	const run = { command: "echo \x1b]0;pwned\x07hi", outputLines: ["ok\x1b]52;c;ZXZpbA==\x07\x1b[2J\r!"], status: "complete" as const, expanded: true };
+	const bashLines = renderBashRun(p, run, 40, (text, tone) => fullOutput(p, text, tone, 35));
+	assert.ok(!bashLines.join("").includes("\x1b]0;") && !bashLines.join("").includes("\x1b]52;") && !bashLines.join("").includes("\x1b[2J"));
+	const compactLines = renderCompaction(p, "sum\x1b]0;pwned\x07\x1b[2Jmary", true, "ctrl+o", 40);
+	assert.ok(!compactLines.join("").includes("\x1b]0;") && !compactLines.join("").includes("\x1b[2J"));
+});
+
+test("assistant dot follows palette changes across renders", () => {
+	let current = new Palette("dark", "truecolor");
+	const children: { render(w: number): string[] }[] = [];
+	const self = {
+		contentContainer: { clear: () => (children.length = 0), addChild: (c: { render(w: number): string[] }) => children.push(c) },
+		markdownSlots: [],
+		markdownTheme: {
+			heading: (t: string) => t, link: (t: string) => t, linkUrl: (t: string) => t, code: (t: string) => t, codeBlock: (t: string) => t,
+			codeBlockBorder: (t: string) => t, quote: (t: string) => t, quoteBorder: (t: string) => t, hr: (t: string) => t, listBullet: (t: string) => t,
+			bold: (t: string) => t, italic: (t: string) => t, strikethrough: (t: string) => t, underline: (t: string) => t,
+		},
+		markdownTransformers: [],
+		hideThinkingBlock: false,
+		hiddenThinkingLabel: "",
+		thinkingVisibilityOverrides: new Map(),
+		lastMessage: undefined,
+		isStreaming: false,
+		hasToolCalls: false,
+	};
+	updateAssistantContent.call(self as never, { content: [{ type: "text", text: "Hi" }], stopReason: "stop" }, false, () => current);
+	const darkOut = children.flatMap((c) => c.render(30)).join("\n");
+	assert.ok(darkOut.includes("38;2;255;255;255"), "dark theme text colour");
+	current = new Palette("light", "truecolor");
+	const lightOut = children.flatMap((c) => c.render(30)).join("\n");
+	assert.ok(lightOut.includes("38;2;0;0;0"), "light theme text colour");
+});
+
+test("empty write shows 1 line with (No content)", () => {
+	const ctx = { cwd: "/w", expanded: false, isError: false, isPartial: false, expandKey: "ctrl+o" };
+	assert.deepEqual(plain(BUILTIN_VIEWS.write!.result!(p, { path: "/w/empty.txt", content: "" }, { content: [] }, ctx, 80)), [
+		"Wrote 1 line to empty.txt",
+		" 1 (No content)",
+	]);
+});
+
+test("truncatedOutput counts tabs when measuring wrapped rows", () => {
+	// Width is max(20 - 10, 10) = 10; 5th line has 3 tabs = 12 cols → 2 wrapped rows, so 6 total → +3 lines.
+	const tabbed = plain(truncatedOutput(p, "1\n2\n3\n4\n\t\t\tx", 20, "ctrl+o"));
+	assert.equal(tabbed.at(-1), "… +3 lines (ctrl+o to expand)");
+});
+
+test("diff keeps grapheme clusters intact when wrapping", () => {
+	const family = "👨‍👩‍👧‍👦";
+	const diffRows = plain(renderDiffRows(p, parseDiff(`+1 aaaa${family}b`), 9));
+	assert.ok(diffRows.some((r) => r.includes(family)), `grapheme split across rows: ${JSON.stringify(diffRows)}`);
 });

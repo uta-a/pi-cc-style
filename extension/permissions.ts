@@ -100,6 +100,8 @@ function words(command: string): string[] {
  * a flag first (`git -c core.fsmonitor=… status`).
  */
 export function commandPrefix(command: string): string | undefined {
+	// `uIe`: commands with tabs, line breaks or characters altered by `sanitize` get no prefix rule.
+	if (/[\t\n\u2028\u2029]/.test(command) || sanitize(command) !== command) return undefined;
 	if (isCompoundCommand(command)) return undefined;
 	const [first, second] = words(command);
 	if (!first || !WORD.test(first) || RUNS_ANYTHING.has(basename(first))) return undefined;
@@ -195,8 +197,9 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 	// `Xo`: the path relative to the working directory, or with ~.
 	const shortPath = abs ? displayPath(abs, req.cwd) : path;
 	if (SHELL_TOOLS.has(req.toolName)) {
-		const command = sanitize(typeof req.input.command === "string" ? req.input.command : "");
-		const prefix = req.toolName === "bash" ? commandPrefix(command) : undefined;
+		const rawCommand = typeof req.input.command === "string" ? req.input.command : "";
+		const command = sanitize(rawCommand);
+		const prefix = req.toolName === "bash" ? commandPrefix(rawCommand) : undefined;
 		// A command no prefix can cover (compound, wrappers, interpreters) only gets yes / no.
 		const options: PermissionOption[] = [
 			{ value: "yes", label: "Yes" },
@@ -205,7 +208,7 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 				: [
 						{
 							value: "yes-session" as const,
-							label: `Yes, and don't ask again for ${p.bold(prefix)} commands in ${p.bold(req.cwd.replace(process.env.HOME ?? "\0", "~"))}`,
+							label: `Yes, and don't ask again for ${p.bold(prefix)} commands in ${p.bold(sanitize(req.cwd))}`,
 						},
 					]),
 			{ value: "no", label: "No" },
@@ -249,8 +252,8 @@ export function describeRequest(p: Palette, req: PermissionRequest, width: numbe
 		: [{ oldText: req.input.oldText as string | undefined, newText: req.input.newText as string | undefined }];
 	const body: string[] = [`  ${p.dim(shortPath)}`];
 	for (const edit of edits) {
-		const before = sanitize(edit.oldText ?? "").split("\n");
-		const after = sanitize(edit.newText ?? "").split("\n");
+		const before = sanitize(edit.oldText ?? "", { keepTabs: true }).split("\n");
+		const after = sanitize(edit.newText ?? "", { keepTabs: true }).split("\n");
 		const diff = [...before.map((l, i) => `-${i + 1} ${l}`), ...after.map((l, i) => `+${i + 1} ${l}`)].join("\n");
 		body.push(...renderDiffRows(p, parseDiff(diff), Math.max(20, width - 4), { highlight: highlight ? (c) => highlight(c, path) : undefined }).map((l) => `  ${l}`));
 	}

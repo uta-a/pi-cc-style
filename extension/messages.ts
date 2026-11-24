@@ -22,9 +22,9 @@ export interface Component {
 /** A child drawn right of a 2-column gutter: `first` before its first line, spaces before the rest. */
 export class Gutter implements Component {
 	child: Component;
-	first: string;
+	first: string | (() => string);
 	rest: string;
-	constructor(child: Component, first: string, rest = "  ") {
+	constructor(child: Component, first: string | (() => string), rest = "  ") {
 		this.child = child;
 		this.first = first;
 		this.rest = rest;
@@ -32,8 +32,9 @@ export class Gutter implements Component {
 	render(width: number): string[] {
 		const gutter = visibleWidth(this.rest);
 		const lines = this.child.render(Math.max(1, width - gutter));
+		const head = typeof this.first === "function" ? this.first() : this.first;
 		return clampLines(
-			lines.map((line, i) => (i === 0 ? this.first : this.rest) + line),
+			lines.map((line, i) => (i === 0 ? head : this.rest) + line),
 			width,
 		);
 	}
@@ -233,7 +234,7 @@ export function updateAssistantContent(
 		const block = content[i]!;
 		if (block.type === "text" && block.text?.trim()) {
 			const markdown = markdownBlock("text", block.text.trim());
-			const dot = shownDot ? "  " : `${getPalette().fg("text", DOT)} `;
+			const dot = shownDot ? "  " : () => `${getPalette().fg("text", DOT)} `;
 			shownDot = true;
 			add(new Gutter(markdown, dot));
 			needsSpacer = true;
@@ -357,12 +358,12 @@ export function renderBashRun(
 	output: (text: string, tone: "plain" | "error") => string[],
 ): string[] {
 	const contentWidth = Math.max(1, width - 3);
-	const input = wrapTextWithAnsi(run.command, contentWidth).map((line, i) => {
+	const input = wrapTextWithAnsi(sanitize(run.command), contentWidth).map((line, i) => {
 		const prefix = i === 0 ? `${p.fg("bashBorder", "!")} ` : "  ";
 		const content = prefix + line;
 		return p.bg("bashMessageBackgroundColor", content + " ".repeat(Math.max(0, width - visibleWidth(content))));
 	});
-	const text = run.outputLines.join("\n");
+	const text = sanitize(run.outputLines.join("\n"));
 	let rows: string[];
 	if (run.status === "running") rows = text.trim() ? output(text, "plain") : [p.dim("Running…")];
 	else if (run.status === "cancelled") rows = [...output(text, "plain"), p.dim("Interrupted")];
@@ -377,7 +378,7 @@ export function renderBashRun(
 export function renderCompaction(p: Palette, summary: string, expanded: boolean, expandKey: string, width: number): string[] {
 	const head = `${p.fg("text", DOT)} ${p.bold("Compact summary")}${expanded ? "" : ` ${p.dim(`(${expandKey} to expand)`)}`}`;
 	if (!expanded) return [truncateToWidth(head, width, "")];
-	const body = summary
+	const body = sanitize(summary)
 		.split("\n")
 		.flatMap((line) => (line ? wrapTextWithAnsi(line, Math.max(1, width - 5)) : [""]))
 		.map((line) => p.dim(line));

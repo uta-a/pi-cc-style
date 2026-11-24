@@ -35,7 +35,7 @@
 | 入力欄 | `jpt` `pbn` `zwa` | 上下だけの round 罫線、`❯`+NBSP、`Try "…"` | `extension/editor.ts` |
 | 入力欄の下 | `ylt` `yD` `Uut` `YC` `Dr`（全画面版は `jRe` `eH`） | inline 版: `⏵⏵ accept edits on` をモードの色、dim の ` (shift+tab to cycle)`、`esc to interrupt`、`? for shortcuts` | `extension/turn.ts`（`renderPromptFooter`） |
 | 権限モード | `Dr` `Tr` | manual / accept edits / plan / bypass permissions | `extension/permissions.ts` |
-| 確認ダイアログ | `tl` `Ate` `ct` `n8n` `$t` `hp` `r8i` | タイトル、`Do you want to proceed?`、3択の文言、拒否時の文面 | `extension/permissions.ts` |
+| 確認ダイアログ | `tl` `Ate` `ct` `n8n` `$t` `hp` `r8i` | タイトル、`Do you want to proceed?`、3択の文言（cwd は `~` に置き換えず絶対パスで表示）、拒否時の文面 | `extension/permissions.ts` |
 | compaction | `s7n` ほか | `⏺ Compact summary (ctrl+o to expand)` | `extension/messages.ts` |
 
 ## pi への適応

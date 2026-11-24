@@ -10,6 +10,7 @@
  * Input is pi's display diff (`+12 text`, `-12 text`, ` 12 text`, `   ...`).
  */
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { graphemeSegmenter } from "./format.ts";
 import type { Palette, RGB } from "./palette.ts";
 
 export type Marker = "+" | "-" | " ";
@@ -234,7 +235,7 @@ function wrapSegments(segments: Segment[], width: number): Segment[][] {
 	let col = 0;
 	for (const seg of segments) {
 		let current = "";
-		for (const ch of Array.from(seg.text)) {
+		for (const { segment: ch } of graphemeSegmenter.segment(seg.text)) {
 			const w = Math.max(0, visibleWidth(ch));
 			if (col + w > width && col > 0) {
 				if (current) rows[rows.length - 1]!.push({ ...seg, text: current });
@@ -266,13 +267,35 @@ export interface DiffRenderOptions {
 	dim?: boolean;
 }
 
+/** `Ae`: expands tabs to 8-column stops, returning the text and a raw-to-expanded index map. */
+export function expandTabs(raw: string): { text: string; map: number[] } {
+	const map = new Array<number>(raw.length + 1);
+	let text = "";
+	let col = 0;
+	for (const { segment, index } of graphemeSegmenter.segment(raw)) {
+		if (segment === "\t") {
+			map[index] = text.length;
+			const spaces = 8 - (col % 8);
+			text += " ".repeat(spaces);
+			col += spaces;
+		} else {
+			const base = text.length;
+			for (let k = 0; k < segment.length; k++) map[index + k] = base + k;
+			text += segment;
+			col += Math.max(0, visibleWidth(segment));
+		}
+	}
+	map[raw.length] = text.length;
+	return { text, map };
+}
+
 /** Renders the rows at `width` columns (Claude Code passes the terminal width minus 12). */
 export function renderDiffRows(p: Palette, items: DiffItem[], width: number, options: DiffRenderOptions = {}): string[] {
 	const rows = items.filter((item): item is DiffRow => !("gap" in item));
 	const digits = String(rows.reduce((max, r) => Math.max(max, r.lineNumber), 0)).length;
 	const codeWidth = Math.max(1, width - digits - 2 - 1);
 	const ranges = new Map<DiffRow, Range[]>();
-	// Faint diffs skip the word emphasis (`if(!t){…We…}`).
+	// Faint diffs skip the word emphasis (`if(!t){…We…}`); `We` runs on raw code before tab expansion.
 	for (const [a, b] of options.dim ? [] : pairRows(rows)) {
 		const [removed, added] = wordRanges(rows[a]!.code, rows[b]!.code);
 		ranges.set(rows[a]!, removed);
@@ -291,10 +314,11 @@ export function renderDiffRows(p: Palette, items: DiffItem[], width: number, opt
 		const changed = item.marker !== " ";
 		const lineBg = item.marker === "+" ? addedBg : item.marker === "-" ? removedBg : undefined;
 		const wordBg = item.marker === "+" ? addedWord : item.marker === "-" ? removedWord : undefined;
-		const code = item.code.replace(/\t/g, "        ");
+		const { text: code, map } = expandTabs(item.code);
+		const mappedRanges = (ranges.get(item) ?? []).map((r) => ({ start: map[r.start]!, end: map[r.end]! }));
 		// Removed lines keep the plain text colour (`T==="-"` → `[[D(c),M]]`); ANSI themes draw them faint.
 		const highlighted = options.highlight && item.marker !== "-" ? options.highlight(code) : code;
-		const segments = applyBackground(ansiSegments(highlighted), lineBg, wordBg, ranges.get(item) ?? []);
+		const segments = applyBackground(ansiSegments(highlighted), lineBg, wordBg, mappedRanges);
 		const wrapped = wrapSegments(segments, codeWidth);
 		const deco = changed ? fgCodeOf(p, decoration(p, item.marker as "+" | "-")) : undefined;
 		wrapped.forEach((row, index) => {

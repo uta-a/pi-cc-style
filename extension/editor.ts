@@ -12,6 +12,7 @@ import type { Palette } from "./palette.ts";
 
 export const GUTTER = 2;
 const PATCHED = Symbol.for("pi-cc-style.editor");
+const OPTIONS = Symbol.for("pi-cc-style.editor.options");
 
 /** `─` across the width, with pi's scroll hint when lines are hidden. */
 export function promptBorder(p: Palette, width: number, color: string, hidden: number, arrow: "↑" | "↓"): string {
@@ -52,6 +53,7 @@ interface EditorLike {
 	focused?: boolean;
 	handleMouse?(event: { x: number; y: number; width: number; height: number; [key: string]: unknown }): unknown;
 	[PATCHED]?: boolean;
+	[OPTIONS]?: PromptOptions;
 }
 
 export interface PromptOptions {
@@ -66,14 +68,16 @@ export interface PromptOptions {
 /** Wraps an editor instance in Claude Code's prompt box. */
 export function decorateEditor<T extends object>(editor: T, options: PromptOptions): T {
 	const target = editor as unknown as EditorLike;
+	target[OPTIONS] = options;
 	if (target[PATCHED]) return editor;
 	target[PATCHED] = true;
 	const originalRender = target.render.bind(target);
 	const originalMouse = target.handleMouse?.bind(target);
 
 	target.render = (width: number) => {
-		if (!options.enabled() || width < GUTTER + 4) return originalRender(width);
-		const p = options.palette();
+		const current = target[OPTIONS]!;
+		if (!current.enabled() || width < GUTTER + 4) return originalRender(width);
+		const p = current.palette();
 		if (typeof target.paddingX === "number") target.paddingX = 0;
 		const inner = originalRender(width - GUTTER);
 		const text = target.getText();
@@ -85,9 +89,9 @@ export function decorateEditor<T extends object>(editor: T, options: PromptOptio
 		const hiddenBelow = hiddenCount(inner[1 + visible], "\u2193");
 		const below = inner.slice(1 + visible + 1);
 		const out = [promptBorder(p, width, color, above, "↑")];
-		const placeholder = text.length === 0 ? options.placeholder() : undefined;
+		const placeholder = text.length === 0 ? current.placeholder() : undefined;
 		content.forEach((line, i) => {
-			const gutter = i === 0 && above === 0 ? promptPointer(p, shell, options.busy?.() ?? false) : " ".repeat(GUTTER);
+			const gutter = i === 0 && above === 0 ? promptPointer(p, shell, current.busy?.() ?? false) : " ".repeat(GUTTER);
 			const body = placeholder !== undefined && i === 0 ? placeholderLine(p, placeholder, width - GUTTER, target.focused !== false) : line;
 			out.push(gutter + body);
 		});
@@ -98,7 +102,7 @@ export function decorateEditor<T extends object>(editor: T, options: PromptOptio
 
 	if (originalMouse) {
 		target.handleMouse = (event) => {
-			if (!options.enabled()) return originalMouse(event);
+			if (!target[OPTIONS]!.enabled()) return originalMouse(event);
 			return originalMouse({ ...event, x: Math.max(0, event.x - GUTTER), width: Math.max(1, event.width - GUTTER) });
 		};
 	}

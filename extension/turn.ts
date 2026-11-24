@@ -2,6 +2,7 @@
  * The turn summary (`lM` of 2.1.330): `✻ Cooked for 1m 5s`, glyph and text faint, after every
  * turn that completes. The verb is picked by hashing the message id (`Wy`).
  */
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { clampLines, formatDuration, TEARDROP, turnVerb } from "./format.ts";
 import type { Palette } from "./palette.ts";
 import { MODE_INFO, type PermissionMode } from "./permissions.ts";
@@ -41,10 +42,16 @@ export function formatDoneTime(at: number, now = Date.now(), locale = timeLocale
 	return new Intl.DateTimeFormat(locale, options).format(when);
 }
 
-/** The summary row (`lM`): `✻ Cooked for 1m 5s · done 3:04 PM`, all faint; pi adds the blank line above. */
-export function renderTurnSummary(p: Palette, data: TurnEntryData, now = Date.now()): string[] {
+/** The summary row (`lM` inside `ki`): `✻ Cooked for 1m 5s · done 3:04 PM`, wrapped under the 2-column gutter. */
+export function renderTurnSummary(p: Palette, data: TurnEntryData, now = Date.now(), width = Infinity): string[] {
 	const done = data.endedAt !== undefined ? ` · done ${formatDoneTime(data.endedAt, now)}` : "";
-	return [`${p.dim(TEARDROP)} ${p.dim(`${turnVerb(data.id)} for ${formatDuration(data.durationMs)}${done}`)}`];
+	const text = `${turnVerb(data.id)} for ${formatDuration(data.durationMs)}${done}`;
+	if (!Number.isFinite(width)) return [`${p.dim(TEARDROP)} ${p.dim(text)}`];
+	const wrapped = wrapTextWithAnsi(text, Math.max(1, width - 2));
+	return clampLines(
+		wrapped.map((line, i) => `${i === 0 ? `${p.dim(TEARDROP)} ` : "  "}${p.dim(line)}`),
+		width,
+	);
 }
 
 /**

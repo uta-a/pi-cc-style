@@ -16,7 +16,7 @@ import { isAbsolute, relative } from "node:path";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { countChanges, parseDiff, renderDiffRows } from "./diff.ts";
 import { renderGroupRows, type ToolGroups } from "./grouping.ts";
-import { clampLines, DOT, ELLIPSIS, moreLines, plural, sanitize, tildify } from "./format.ts";
+import { clampLines, DOT, ELLIPSIS, graphemeSegmenter, moreLines, plural, sanitize, tildify } from "./format.ts";
 import { type Component, resultRows } from "./messages.ts";
 import type { Palette } from "./palette.ts";
 
@@ -62,7 +62,6 @@ function wrapPlain(text: string, width: number): string[] {
 	return text.split("\n").flatMap((line) => hardWrap(line, width));
 }
 
-const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 /** CSI (SGR and others), OSC and APC sequences, terminated by BEL or ST. */
 const ANSI = /\x1b(?:\[[0-?]*[ -/]*[@-~]|[\]_][^\x07\x1b]*(?:\x07|\x1b\\))/y;
 
@@ -96,7 +95,7 @@ export function hardWrap(line: string, width: number): string[] {
 		}
 		let end = line.indexOf("\x1b", i + 1);
 		if (end < 0) end = line.length;
-		for (const { segment } of segmenter.segment(line.slice(i, end))) {
+		for (const { segment } of graphemeSegmenter.segment(line.slice(i, end))) {
 			const w = visibleWidth(segment);
 			if (used > 0 && used + w > width) {
 				out.push(active ? `${piece}\x1b[0m` : piece);
@@ -167,11 +166,12 @@ export function truncatedOutput(p: Palette, text: string, columns: number, expan
 	const wrapped: string[] = [];
 	let total = 0;
 	for (const line of trimmed.split("\n")) {
+		const expanded = line.replace(/\t/g, "    ");
 		if (wrapped.length < 4) {
-			const rows = hardWrap(line.replace(/\t/g, "    "), width).map((l) => l.trimEnd());
+			const rows = hardWrap(expanded, width).map((l) => l.trimEnd());
 			wrapped.push(...rows);
 			total += rows.length;
-		} else total += wrappedRows(line, width);
+		} else total += wrappedRows(expanded, width);
 	}
 	const hidden = total - 3;
 	const shown = hidden === 1 ? wrapped.slice(0, 4) : wrapped.slice(0, 3);
@@ -297,7 +297,7 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 			if (ctx.isError) return errorRows(p, resultText(result), ctx);
 			const details = result.details as { diff?: string } | undefined;
 			if (!details?.diff) return [p.dim(stripNotices(resultText(result)) || "Updated")];
-			const items = parseDiff(sanitize(details.diff));
+			const items = parseDiff(sanitize(details.diff, { keepTabs: true }));
 			const { added, removed } = countChanges(items);
 			const parts: string[] = [];
 			if (added > 0) parts.push(`Added ${b(p, added)} ${added > 1 ? "lines" : "line"}`);
@@ -317,10 +317,11 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 		result(p, args, result, ctx) {
 			if (ctx.isError) return errorRows(p, resultText(result), ctx);
 			const content = sanitize(str(args.content));
-			const n = countLines(content);
+			// Write's `ue` counts an empty file as 1 line and renders "(No content)" in the code view.
+			const n = content ? countLines(content) : 1;
 			const path = displayPath(str(args.path ?? args.file_path), ctx.cwd);
 			const out = [`Wrote ${b(p, n)} ${plural(n, "line")} to ${b(p, path)}`];
-			const lines = content.replace(/\n$/, "").split("\n");
+			const lines = content ? content.replace(/\n$/, "").split("\n") : ["(No content)"];
 			const shown = ctx.expanded ? lines : lines.slice(0, 10);
 			const rawPath = str(args.path ?? args.file_path);
 			// `Hv`: the code view with a faint line-number gutter.
@@ -389,7 +390,7 @@ export const BUILTIN_VIEWS: Record<string, ToolView> = {
 export function genericArgs(args: Record<string, unknown>): string {
 	return Object.entries(args ?? {})
 		.filter(([, v]) => v !== undefined)
-		.map(([k, v]) => `${k}: ${typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v)}`)
+		.map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
 		.join(", ");
 }
 

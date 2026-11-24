@@ -157,7 +157,6 @@ export function spinnerFrames(term = process.env.TERM): string[] {
 	return ["·", "✢", "✳", "✶", "✻", "✽"];
 }
 
-/** `zwa`: the empty-prompt examples. `<file>` is replaced by a file of the project when one is known. */
 /** `zwa`: the `Try "…"` examples; `<filepath>` is replaced by a file of the project when there is one. */
 export const PROMPT_EXAMPLES = [
 	"fix lint errors",
@@ -193,13 +192,13 @@ const TERMINAL_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|[\]P_^X][^\x07\x1b]*(?:\x0
  * returns; tabs become spaces. Without this a tool result could set the clipboard (OSC 52), retitle
  * the terminal, leave the alternate screen or overwrite rows of the transcript.
  */
-export function sanitize(text: string): string {
-	return stripTerminalSequences(text)
-		.replace(TERMINAL_SEQUENCE, "")
-		.replace(/\r/g, "")
-		.replace(/\t/g, "    ")
-		.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F￹-￻]/g, "");
+export function sanitize(text: string, options: { keepTabs?: boolean } = {}): string {
+	const clean = stripTerminalSequences(text).replace(TERMINAL_SEQUENCE, "").replace(/\r/g, "");
+	return (options.keepTabs ? clean : clean.replace(/\t/g, "    ")).replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F￹-￻]/g, "");
 }
+
+/** Shared grapheme segmenter for width-aware wrapping and tab expansion. */
+export const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /** Cuts every line to the width; pi-tui throws on wider lines in its regular screen mode. */
 export function clampLines(lines: string[], width: number): string[] {

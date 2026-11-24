@@ -21,6 +21,7 @@ import {
 	CustomEditor,
 	type ExtensionAPI,
 	type ExtensionContext,
+	type ExtensionUIContext,
 	getLanguageFromPath,
 	highlightCode,
 	InteractiveMode,
@@ -53,6 +54,7 @@ import { renderPromptFooter, renderTurnSummary, TURN_ENTRY, type TurnEntryData }
 const isSubagentChild = () => process.env.PI_SUBAGENT_CHILD === "1" || Boolean(process.env.PI_SUBAGENT_PARENT_SESSION);
 
 const STATUS_PATCHED = Symbol.for("pi-cc-style.status");
+const EDITOR_BASE = Symbol.for("pi-cc-style.editor.base");
 
 /** Highlights one line of code for a path, in the active theme's syntax colours. */
 function highlightLine(code: string, path: string): string {
@@ -219,7 +221,7 @@ export default function piCcStyle(pi: ExtensionAPI) {
 	pi.registerEntryRenderer<TurnEntryData>(TURN_ENTRY, (entry) => {
 		const data = entry.data;
 		if (!data || !getSettings().turnDuration) return undefined;
-		return new CachedLines(() => renderTurnSummary(palette(), data), palette);
+		return new CachedLines((width) => renderTurnSummary(palette(), data, Date.now(), width), palette);
 	});
 
 	const installUi = (ctx: ExtensionContext) => {
@@ -280,8 +282,11 @@ export default function piCcStyle(pi: ExtensionAPI) {
 				},
 				{ placement: "belowEditor" },
 			);
-			const previous = ctx.ui.getEditorComponent();
-			ctx.ui.setEditorComponent((editorTui, theme, keybindings) => {
+			type EditorFactory = NonNullable<ReturnType<ExtensionUIContext["getEditorComponent"]>>;
+			type TaggedFactory = EditorFactory & { [EDITOR_BASE]?: EditorFactory };
+			const currentFactory = ctx.ui.getEditorComponent() as TaggedFactory | undefined;
+			const previous = currentFactory && EDITOR_BASE in currentFactory ? currentFactory[EDITOR_BASE] : currentFactory;
+			const wrappedFactory: TaggedFactory = (editorTui, theme, keybindings) => {
 				tui = editorTui;
 				const editor = previous ? previous(editorTui, theme, keybindings) : new CustomEditor(editorTui, theme, keybindings);
 				promptEditor = editor as { focused?: boolean };
@@ -291,7 +296,9 @@ export default function piCcStyle(pi: ExtensionAPI) {
 					placeholder: () => (hasUserMessage ? undefined : placeholder),
 					busy: () => turnStartedAt !== undefined,
 				});
-			});
+			};
+			wrappedFactory[EDITOR_BASE] = previous;
+			ctx.ui.setEditorComponent(wrappedFactory);
 		}
 
 		// shift+tab cycles the permission mode, as in Claude Code: only while the prompt has the focus,
